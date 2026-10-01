@@ -43,7 +43,7 @@
     ]
   },
   "scripts": {
-    "test": "node --import tsx --test tests/nimble.test.ts tests/sdk.test.ts tests/package.test.ts tests/nimble-api.test.ts && vitest run tests/engine.test.ts",
+    "test": "node --import tsx --test tests/nimble.test.ts tests/sdk.test.ts tests/package.test.ts tests/nimble-api.test.ts tests/batching-controls.test.ts tests/excerpt-strategies.test.ts tests/truncated-projection.test.ts && vitest run tests/engine.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
     "smoke:ollama": "PI_NIMBLE_LIVE=1 node --import tsx --test --test-name-pattern='live local Ollama' tests/nimble-api.test.ts"

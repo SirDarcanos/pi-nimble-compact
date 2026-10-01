@@ -22,6 +22,7 @@ export interface Config {
   keepRecentTokens: number;
   maxPaybackTurns: number;
   timeoutMs: number;
+  truncateMinChars: number;
 }
 
 function number(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -40,6 +41,8 @@ export function configuration(env: NodeJS.ProcessEnv = process.env): Config {
     keepRecentTokens: number(env.PI_NIMBLE_KEEP_RECENT_TOKENS, 12_000, 2_000, 100_000),
     maxPaybackTurns: number(env.PI_NIMBLE_MAX_PAYBACK_TURNS, 20, 1, 1_000),
     timeoutMs: number(env.PI_NIMBLE_TIMEOUT_MS, 30_000, 100, 180_000),
+    // Zero disables the retained-output shortening tier.
+    truncateMinChars: number(env.PI_NIMBLE_TRUNCATE_MIN_CHARS, 4_000, 0, 2_000_000),
   };
 }
 
@@ -62,25 +65,51 @@ export function clearedText(ref: string): string {
   return `[pi-nimble: older tool output cleared from context; original retained in this session. Retrieve with nimble_read({"ref":"${ref}"}). Do not rerun a side-effecting command to recover its output.]`;
 }
 
-export function ledger(branch: readonly SessionEntry[]): Set<string> {
-  const refs = new Set<string>();
+function readLedgers(branch: readonly SessionEntry[]): { cleared: Set<string>; truncated: Set<string> } {
+  const cleared = new Set<string>(), truncated = new Set<string>();
+  const validRef = (ref: unknown): ref is string => typeof ref === "string" && /^[a-f0-9]{24}$/.test(ref);
   for (const entry of branch) {
     if (entry.type !== "custom" || entry.customType !== ENTRY_TYPE) continue;
-    const data = entry.data as { version?: unknown; refs?: unknown; reset?: unknown } | undefined;
+    const data = entry.data as { version?: unknown; refs?: unknown; truncatedRefs?: unknown; reset?: unknown } | undefined;
     if (data?.version !== 1 || !Array.isArray(data.refs)) continue;
     if (data.reset === true) {
-      if (data.refs.length === 0) refs.clear();
+      if (data.refs.length === 0) { cleared.clear(); truncated.clear(); }
       continue;
     }
-    for (const ref of data.refs) if (typeof ref === "string" && /^[a-f0-9]{24}$/.test(ref)) refs.add(ref);
+    for (const ref of data.refs) if (validRef(ref)) { cleared.add(ref); truncated.delete(ref); }
+    if (Array.isArray(data.truncatedRefs)) for (const ref of data.truncatedRefs) {
+      if (validRef(ref) && !cleared.has(ref)) truncated.add(ref);
+    }
   }
-  return refs;
+  return { cleared, truncated };
 }
 
-export function applyPruning(messages: readonly AgentMessage[], refs: ReadonlySet<string>): AgentMessage[] {
+/** Legacy v1 entries remain marker-only masks. */
+export function ledger(branch: readonly SessionEntry[]): Set<string> { return readLedgers(branch).cleared; }
+export function truncationLedger(branch: readonly SessionEntry[]): Set<string> { return readLedgers(branch).truncated; }
+
+export const TRUNCATE_RETAIN_CHARS = 600;
+export function truncatedText(result: ToolResult): string {
+  const text = textOf(result);
+  if (text.length <= TRUNCATE_RETAIN_CHARS) return text;
+  const ref = reference(result);
+  const marker = `[pi-nimble: older tool output truncated; ${text.length - TRUNCATE_RETAIN_CHARS} characters omitted. `
+    + `Full original retained in this session. Retrieve with nimble_read({"ref":"${ref}"}) for omitted evidence, especially before editing. `
+    + "Do not rerun a side-effecting command to recover its output.]";
+  const shortened = `${text.slice(0, 300)}\n${marker}\n${text.slice(-300)}`;
+  return shortened.length < text.length ? shortened : text;
+}
+
+export function applyPruning(
+  messages: readonly AgentMessage[], refs: ReadonlySet<string>, truncated: ReadonlySet<string> = new Set(),
+): AgentMessage[] {
   return messages.map(message => {
-    if (message.role !== "toolResult" || !refs.has(reference(message))) return message;
-    return { ...message, content: [{ type: "text", text: clearedText(reference(message)) }] };
+    if (message.role !== "toolResult") return message;
+    const ref = reference(message);
+    if (!refs.has(ref) && !truncated.has(ref)) return message;
+    const text = refs.has(ref) ? clearedText(ref) : truncatedText(message);
+    if (text === textOf(message)) return message;
+    return { ...message, content: [{ type: "text", text }] };
   });
 }
 
@@ -263,26 +292,42 @@ const CACHE_REWRITE = 1.25 - CACHE_READ;
  * saves the most while its one-time rewrite repays within `maxPaybackTurns` later requests; older outputs wait
  * for a batch large enough to justify invalidating everything after them.
  */
-export function affordable(
-  messages: readonly AgentMessage[], refs: ReadonlySet<string>, cleared: readonly Candidate[], maxPaybackTurns: number,
-): Candidate[] {
+export function affordableReductions(
+  messages: readonly AgentMessage[], refs: ReadonlySet<string>, truncatedRefs: ReadonlySet<string>,
+  cleared: readonly Candidate[], truncated: readonly Candidate[], maxPaybackTurns: number,
+): { cleared: Candidate[]; truncated: Candidate[]; saved: number } {
   const position = new Map(messages.flatMap((message, index) =>
     message.role === "toolResult" ? [[reference(message), index] as const] : []));
-  const ordered = cleared.filter(item => position.has(item.ref))
+  const clearRefs = new Set(cleared.map(item => item.ref));
+  const byRef = new Map([...truncated, ...cleared].map(item => [item.ref, item]));
+  const before = applyPruning(messages, refs, truncatedRefs);
+  const ordered = [...byRef.values()].filter(item => position.has(item.ref) && !refs.has(item.ref)
+    && (clearRefs.has(item.ref) || !truncatedRefs.has(item.ref)))
     .toSorted((a, b) => position.get(b.ref)! - position.get(a.ref)!);
   let best: Candidate[] = [];
   let bestSaved = 0;
   for (let count = 1; count <= ordered.length; count++) {
     const subset = ordered.slice(0, count);
-    const masked = applyPruning(messages, new Set([...refs, ...subset.map(item => item.ref)]));
+    const masked = applyPruning(messages,
+      new Set([...refs, ...subset.filter(item => clearRefs.has(item.ref)).map(item => item.ref)]),
+      new Set([...truncatedRefs, ...subset.filter(item => !clearRefs.has(item.ref)).map(item => item.ref)]));
     const rewritten = masked.slice(position.get(subset.at(-1)!.ref)!).reduce((sum, message) => sum + estimateTokens(message), 0);
-    const saved = subset.reduce((sum, item) => sum + estimateTokens(item.result) - estimateTokens(masked[position.get(item.ref)!]!), 0);
+    // Measure only incremental savings when upgrading a truncated result to marker-only.
+    const saved = subset.reduce((sum, item) => sum + estimateTokens(before[position.get(item.ref)!]!)
+      - estimateTokens(masked[position.get(item.ref)!]!), 0);
     if (saved > bestSaved && CACHE_REWRITE * rewritten <= maxPaybackTurns * CACHE_READ * saved) {
       best = subset;
       bestSaved = saved;
     }
   }
-  return best;
+  return { cleared: best.filter(item => clearRefs.has(item.ref)),
+    truncated: best.filter(item => !clearRefs.has(item.ref)), saved: bestSaved };
+}
+
+export function affordable(
+  messages: readonly AgentMessage[], refs: ReadonlySet<string>, cleared: readonly Candidate[], maxPaybackTurns: number,
+): Candidate[] {
+  return affordableReductions(messages, refs, new Set(), cleared, [], maxPaybackTurns).cleared;
 }
 
 function excerpt(text: string, limit: number): string {
@@ -388,7 +433,7 @@ async function boundedJson(response: Response, signal: AbortSignal): Promise<unk
 export async function score(
   messages: readonly AgentMessage[], choices: readonly Candidate[], config: Config,
   signal?: AbortSignal, fetcher: typeof fetch = fetch,
-): Promise<{ refs: string[]; evaluated: number; inputTokens: number | null }> {
+): Promise<{ refs: string[]; keptRefs: string[]; evaluated: number; inputTokens: number | null }> {
   const request = requestBody(messages, choices, config.model);
   const timeout = AbortSignal.timeout(Math.floor(config.timeoutMs));
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -419,7 +464,7 @@ export async function score(
     || typeof outputTokens !== "number" || !Number.isSafeInteger(outputTokens) || outputTokens < 0) {
     throw new Error("Invalid Nimble usage");
   }
-  const refs: string[] = [];
+  const refs: string[] = [], keptRefs: string[] = [];
   for (const [index, item] of request.choices.entries()) {
     const answer = data.answers[`r${index}`];
     if (!record(answer) || !exactKeys(answer, ["type", "noul"]) || answer.type !== "noul"
@@ -427,8 +472,9 @@ export async function score(
       throw new Error("Invalid Nimble probability");
     }
     if (answer.noul < config.keepThreshold) refs.push(item.ref);
+    else keptRefs.push(item.ref);
   }
-  return { refs, evaluated: request.choices.length, inputTokens };
+  return { refs, keptRefs, evaluated: request.choices.length, inputTokens };
 }
 
 export function original(branch: readonly SessionEntry[], ref: string): ToolResult | undefined {
