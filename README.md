@@ -79,6 +79,10 @@ Interactive Pi shows `ready`, `checking…`, `paused`, `dormant`, or `error` alo
 > [!WARNING]
 > Keep `nimble_read` enabled in tool allowlists. Disabling it restores full projected outputs and pauses new pruning. Avoid loading another general-purpose context-pruning extension alongside this one. Provider-native Codex checkpoints also pause pruning on their branch; retrieval remains available.
 
+## Releases
+
+The npm package is named `pi-nimble-compact`. See [the release guide](https://github.com/SirDarcanos/pi-nimble-compact/blob/main/docs/releasing.md) for first-publish setup, version preparation, and GitHub Actions trusted publishing.
+
 ## Configuration
 
 Environment variables are read when the extension loads. Invalid numeric values fall back to defaults. Restart Pi after changing shell variables; `/reload` cannot import exports made in another shell.

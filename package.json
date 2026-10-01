@@ -1,5 +1,5 @@
 {
-  "name": "@sirdarcanos/pi-nimble-compact",
+  "name": "pi-nimble-compact",
   "version": "0.1.0",
   "description": "Automatic Nimble context clearing for Pi. Keep the conversation, prune stale tool output, retrieve originals without rerunning commands.",
   "type": "module",
@@ -43,7 +43,7 @@
     ]
   },
   "scripts": {
-    "test": "node --import tsx --test tests/nimble.test.ts tests/sdk.test.ts tests/package.test.ts tests/nimble-api.test.ts tests/batching-controls.test.ts tests/excerpt-strategies.test.ts tests/truncated-projection.test.ts tests/quality-harness.test.ts && vitest run tests/engine.test.ts",
+    "test": "node --import tsx --test tests/nimble.test.ts tests/sdk.test.ts tests/package.test.ts tests/nimble-api.test.ts tests/batching-controls.test.ts tests/excerpt-strategies.test.ts tests/truncated-projection.test.ts tests/quality-harness.test.ts && vitest run tests/engine.test.ts && node --test tests/release.test.mjs",
     "typecheck": "tsc --noEmit",
     "quality:run": "node --import tsx scripts/quality/run.ts",
     "check": "npm run typecheck && npm test",

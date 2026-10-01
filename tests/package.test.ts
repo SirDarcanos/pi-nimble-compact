@@ -19,7 +19,7 @@ test("published tarball installs offline without runtime dependencies and loads 
   execFileSync(npm, ["install", "--offline", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund", join(temp, packed[0].filename)], { cwd: consumer, encoding: "utf8" });
   const lock = JSON.parse(readFileSync(join(consumer, "package-lock.json"), "utf8"));
   assert.equal(Object.keys(lock.packages).length, 2, "only the consumer and this package, no runtime dependency tree");
-  const installed = join(consumer, "node_modules/@sirdarcanos/pi-nimble-compact");
+  const installed = join(consumer, "node_modules/pi-nimble-compact");
   const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
   assert.ok(manifest.keywords.includes("pi-package"));
   const loader = new DefaultResourceLoader({ cwd: consumer, agentDir: join(temp, "agent"),
