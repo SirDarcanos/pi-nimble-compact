@@ -30,7 +30,7 @@ pi install npm:pi-nimble-compact
 pi
 ```
 
-Inside Pi, run `/nimble-status` to inspect configuration and pruning activity. Clearing starts when context reaches the configured trigger, not immediately after installation.
+Inside Pi, run `/nimble-status` to inspect configuration and pruning activity. Automatic clearing starts when context reaches the configured trigger; run `/nimble-compact` for an on-demand pass.
 
 The default endpoint is `http://127.0.0.1:11434/v1/systemone`, model `nimble`, with no API key. Ollama and its model weights are installed separately; the plugin does not download weights, launch a server, or change Ollama settings. No Python bridge is required.
 
@@ -45,7 +45,7 @@ pi -e ./extensions/nimble.ts
 
 1. **Wait for context pressure.** Evaluate at the lesser of 120,000 tokens or 45% of the model's context window, protecting the most recent 12,000 estimated tokens and complete parallel tool batches.
 2. **Select eligible outputs.** Consider up to 16 successful text outputs of at least 2,000 characters. Complete rereads, identical successful test reruns, and supported diagnostics or checkpoint tools can supersede older evidence.
-3. **Score uncertain evidence.** Fit conversation history into a 2,000-estimated-token scoring state, add bounded output excerpts, and ask Nimble whether each result needs to remain verbatim.
+3. **Score uncertain evidence.** Fit conversation prose and call metadata for the outputs being evaluated into a 2,000-estimated-token scoring state, add bounded output excerpts, and ask Nimble whether each result needs to remain verbatim.
 4. **Apply two tiers.** Superseded results or scores below the default 0.25 keep threshold become retrieval markers. Explicitly retained results longer than 4,000 characters can become head/tail excerpts with a marker between them.
 5. **Check cache payback.** Apply a combined clearing/truncation batch only when its estimated reduction passes the cache-rewrite payback gate; deferred outputs stay intact.
 
@@ -151,6 +151,7 @@ A successful response contains `answers.keep.noul`, a probability between 0 and 
 | --- | --- |
 | Connection refused | Start Ollama and confirm the configured endpoint and port. |
 | Model missing | Run `ollama pull nimble`. |
+| `history too large for Nimble` | The local scoring state exceeded its budget before contacting Ollama. Use Pi's `/compact` to shorten the history, then retry `/nimble-compact`; changing Ollama does not resolve this error. |
 | `/v1/systemone` missing | Update Ollama to 0.35 or later. |
 | Unexpected endpoint or model | Unset old `PI_NIMBLE_URL` / `PI_NIMBLE_MODEL` overrides and restart Pi. |
 | `dormant` | Check whether `PI_NIMBLE_URL` was explicitly set to an empty value. |
