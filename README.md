@@ -135,6 +135,16 @@ The Pi 0.99.2 development dependency tree pins `brace-expansion` 5.0.9 in its pu
 
 Tests cover the copied engine, Pi lifecycle/protocol preservation, branch-local clearing/truncation persistence and retrieval, incremental upgrades, SDK integration, package loading, Ollama defaults and System One responses, request limits, and failure handling. The normal suite uses synthetic sessions and mocked responses, including a local HTTP server. The opt-in `smoke:ollama` check sends only a canned fixture to local Ollama through the plugin's actual scoring transport. Neither test mode measures relevance quality across real tasks or billing savings.
 
+### Fixed-snapshot task-quality trials
+
+From a repository checkout, `npm run quality:run -- --trials 2` makes main-agent requests using **openai-codex / gpt-6.1-sol** (existing Pi credentials). Override with `--provider` and `--model`; unavailable models fail rather than falling back. For a single-arm smoke run, add `--task contract --arm two-tier --trials 1`.
+
+The harness captures one synthetic starting state per task/trial and clones it into independent baseline, marker-only, and two-tier workspaces and SDK sessions. Tasks cover a buried API contract, historical receipt recovery after its file changes, and actual historical test counts with instruction-like diagnostic content. Bounded workspace tools allow solution edits and real test runs; production `nimble_read` retrieves original session evidence. Independent evaluation checks behavior, current tests, final JSON reporting, and repeated receipt side effects. Passing requires that the agent also run current tests.
+
+Masks are **predeclared stress cases**, not classifier predictions: marker-only clears old diagnostics and, for the recovery task, historical receipt evidence; two-tier additionally clips retained contract/test output using production projection. Normal Pi compaction is enabled equally in every arm and recorded separately. This isolates fixed-mask recovery, not live scoring, triggers, payback, or persistence quality. It uses bounded custom tools rather than the full coding toolset, and is not an OS security sandbox. Model-written JavaScript executes locally; use only controlled synthetic tasks.
+
+Ignored `local-data/quality/` contains per-trial sessions, completed-message events, configuration, evaluations, retrieval pages, test-run counts, elapsed time, SDK usage/cache fields, and aggregate reports. Estimated context footprints are not cumulative savings; SDK cost estimates are not measured bills. Classifier overhead is explicitly zero because scoring does not run. Repeated trials of these three templates are not new independent tasks, and passing them cannot establish general task-quality parity. Trial outputs are not packaged or committed.
+
 ## License and credits
 
 MIT. Adapted by [SirDarcanos](https://github.com/SirDarcanos), with copied source from **Nour Helmi** and **tamaratran**. See [`NOTICE.md`](NOTICE.md) and the original MIT license texts shipped in [`licenses/`](licenses/). Nimble is an external model/service from **Bespoke Labs**; its weights and server code are not bundled or relicensed by this plugin.
