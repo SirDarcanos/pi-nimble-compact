@@ -1,6 +1,12 @@
 node_modules/
-.pi/tasks/
+.pi/
 *.tgz
 .env
 .env.*
 !.env.example
+
+# Local synthetic-data tooling and generated fixtures
+.venv/
+__pycache__/
+.data-designer/
+local-data/

@@ -3,8 +3,8 @@ import {
   CustomEditor, buildSessionContext, estimateTokens, type ExtensionAPI, type ExtensionContext, type SessionEntry, type SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-  affordable, applyPruning, candidates, configuration, ENTRY_TYPE, GROWTH_TOKENS,
-  ledger, original, score, superseded, textOf, triggerTokens, type Config,
+  affordableReductions, applyPruning, candidates, configuration, ENTRY_TYPE, GROWTH_TOKENS,
+  ledger, original, score, superseded, textOf, triggerTokens, truncationLedger, type Config,
 } from "../src/pruning.ts";
 
 const EDITOR_COMPONENT_CHANGED_EVENT = "ui-pack:v1:editor-component-changed";
@@ -71,9 +71,10 @@ function cumulativeClearedTokens(entries: readonly SessionEntry[]): number {
   let total = 0;
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== ENTRY_TYPE) continue;
-    const data = entry.data as { version?: unknown; refs?: unknown; estimatedTokensCleared?: unknown } | undefined;
-    if (data?.version !== 1 || !Array.isArray(data.refs) || !data.refs.length
-      || !data.refs.every(ref => typeof ref === "string" && /^[a-f0-9]{24}$/.test(ref))) continue;
+    const data = entry.data as { version?: unknown; refs?: unknown; truncatedRefs?: unknown; estimatedTokensCleared?: unknown } | undefined;
+    if (data?.version !== 1 || !Array.isArray(data.refs)) continue;
+    const refs = [...data.refs, ...(Array.isArray(data.truncatedRefs) ? data.truncatedRefs : [])];
+    if (!refs.length || !refs.every(ref => typeof ref === "string" && /^[a-f0-9]{24}$/.test(ref))) continue;
     if (typeof data.estimatedTokensCleared === "number"
       && Number.isFinite(data.estimatedTokensCleared) && data.estimatedTokensCleared > 0) total += data.estimatedTokensCleared;
   }
@@ -185,9 +186,10 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
     if (nativeCheckpoint(branch)) return;
     const messages = buildSessionContext(branch).messages;
     const refs = ledger(branch);
+    const truncatedRefs = truncationLedger(branch);
     const rawTokens = messages.reduce((sum, message) => sum + estimateTokens(message), 0);
     // Measure what the next request carries: cleared outputs no longer count, so clearing is its own hysteresis.
-    const projectedTokens = applyPruning(messages, refs).reduce((sum, message) => sum + estimateTokens(message), 0);
+    const projectedTokens = applyPruning(messages, refs, truncatedRefs).reduce((sum, message) => sum + estimateTokens(message), 0);
     const usageTokens = ctx.getContextUsage()?.tokens ?? 0;
     if (Math.max(projectedTokens, usageTokens) < triggerTokens(config, ctx.model.contextWindow)) return;
     if (rawTokens >= lastAttemptTokens && rawTokens - lastAttemptTokens < GROWTH_TOKENS) return;
@@ -206,8 +208,8 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
     void (async () => {
       try {
         const result = uncertain.length
-          ? await score(applyPruning(messages, refs), uncertain, config, ownController.signal, options.fetch)
-          : { refs: [] as string[], evaluated: 0, inputTokens: null };
+          ? await score(applyPruning(messages, refs, truncatedRefs), uncertain, config, ownController.signal, options.fetch)
+          : { refs: [] as string[], keptRefs: [] as string[], evaluated: 0, inputTokens: null };
         if (ownController.signal.aborted || epoch !== ownEpoch || !pi.getActiveTools().includes("nimble_read")) return;
         const currentBranch = ctx.sessionManager.getBranch();
         const snapshotIndex = snapshotLeaf ? currentBranch.findIndex(entry => entry.id === snapshotLeaf) : -1;
@@ -217,18 +219,24 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
           return;
         }
         const currentRefs = ledger(currentBranch);
+        const currentTruncated = truncationLedger(currentBranch);
         const currentMessages = buildSessionContext(currentBranch).messages;
         const eligible = new Set(candidates(currentMessages, currentRefs, config.keepRecentTokens).map(item => item.ref));
         const accepted = choices.filter(item => eligible.has(item.ref)
           && (result.refs.includes(item.ref) || (automatic.has(item.ref) && superseded(currentMessages, [item], currentRefs).has(item.ref))));
-        const cleared = affordable(currentMessages, currentRefs, accepted, config.maxPaybackTurns);
-        const deferred = accepted.length - cleared.length;
+        // Shorten only results explicitly retained by valid scoring, never an unscored
+        // candidate dropped from the request budget or a stale result deferred by economics.
+        const toTruncate = config.truncateMinChars > 0 ? choices.filter(item => eligible.has(item.ref)
+          && result.keptRefs.includes(item.ref) && !currentTruncated.has(item.ref)
+          && textOf(item.result).length > config.truncateMinChars) : [];
+        const { cleared, truncated, saved } = affordableReductions(currentMessages, currentRefs,
+          currentTruncated, accepted, toTruncate, config.maxPaybackTurns);
+        const deferred = accepted.length + toTruncate.length - cleared.length - truncated.length;
         const clearedRefs = new Set(cleared.map(item => item.ref));
-        const saved = cleared.reduce((sum, item) => sum + estimateTokens(item.result)
-          - estimateTokens(applyPruning([item.result], clearedRefs)[0]!), 0);
-        if (cleared.length) {
+        if (cleared.length || truncated.length) {
           const entry = {
-            version: 1, refs: [...clearedRefs], model: config.model, evaluated: choices.length,
+            version: 1, refs: [...clearedRefs], truncatedRefs: truncated.map(item => item.ref),
+            model: config.model, evaluated: choices.length,
             estimatedTokensCleared: saved, inputTokens: result.inputTokens,
           };
           const commitLeaf = ctx.sessionManager.getLeafId();
@@ -237,11 +245,12 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
             // Pi advances its in-memory leaf before disk I/O. Invalidate the entry and restore the
             // persisted branch head so later writes cannot become children of an unpersisted ID.
             entry.refs = [];
+            entry.truncatedRefs = [];
             restoreLeaf(ctx.sessionManager, commitLeaf);
             throw error;
           }
         }
-        lastStatus = `${cleared.length}/${choices.length} outputs cleared; ~${saved.toLocaleString()} context tokens removed`
+        lastStatus = `${cleared.length}/${choices.length} outputs cleared; ${truncated.length} truncated; ~${saved.toLocaleString()} context tokens removed`
           + (deferred ? `; ${deferred} deferred until a larger batch repays the cache rewrite` : "");
         warned = false;
       } catch (error) {
@@ -263,7 +272,8 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
     if (!config.endpoint) return;
     updateStatus(ctx);
     if (!pi.getActiveTools().includes("nimble_read") || nativeCheckpoint(ctx.sessionManager.getBranch())) return;
-    const projected = applyPruning(event.messages, ledger(ctx.sessionManager.getBranch()));
+    const branch = ctx.sessionManager.getBranch();
+    const projected = applyPruning(event.messages, ledger(branch), truncationLedger(branch));
     startEvaluation(ctx);
     return { messages: projected };
   });
@@ -277,8 +287,8 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
 
   pi.registerTool({
     name: "nimble_read",
-    label: "Read cleared output",
-    description: "Retrieve original tool output cleared by pi-nimble from this session's active branch. Use the ref in its marker. Read original evidence rather than rerunning commands. offset and limit are character counts; maximum page 16000 characters.",
+    label: "Read original output",
+    description: "Retrieve original tool output cleared or truncated by pi-nimble from this session's active branch. Use the ref in its marker. Read original evidence rather than rerunning commands. offset and limit are character counts; maximum page 16000 characters.",
     parameters: Type.Object({
       ref: Type.String({ pattern: "^[a-f0-9]{24}$" }),
       offset: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -300,12 +310,14 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   });
 
   pi.registerCommand("nimble-reset", {
-    description: "Release all Nimble-cleared outputs on the active branch",
+    description: "Release all Nimble-cleared and truncated outputs on the active branch",
     handler: async (_args, ctx) => {
-      const released = ledger(ctx.sessionManager.getBranch()).size;
+      const branch = ctx.sessionManager.getBranch();
+      const shortened = truncationLedger(branch).size;
+      const released = ledger(branch).size + shortened;
       reset();
       if (!released) {
-        lastStatus = "No cleared outputs to release";
+        lastStatus = "No cleared or truncated outputs to release";
         updateStatus(ctx);
         ctx.ui.notify(lastStatus, "info");
         return;
@@ -322,7 +334,7 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
         ctx.ui.notify(`pi-nimble: ${lastStatus}; existing masks remain active.`, "warning");
         return;
       }
-      lastStatus = `${released} cleared outputs released on this branch`;
+      lastStatus = `${released} ${shortened ? "cleared/truncated" : "cleared"} outputs released on this branch`;
       updateStatus(ctx);
       ctx.ui.notify(`pi-nimble: ${lastStatus}.`, "info");
     },
@@ -338,7 +350,8 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
         !pi.getActiveTools().includes("nimble_read") ? "Paused: nimble_read is inactive"
           : nativeCheckpoint(ctx.sessionManager.getBranch()) ? "Paused: Codex checkpoint owns provider context; retrieval active"
           : "Retrieval active",
-        `${ledger(ctx.sessionManager.getBranch()).size} cleared outputs on this branch`,
+        `${ledger(ctx.sessionManager.getBranch()).size} cleared outputs on this branch; ${truncationLedger(ctx.sessionManager.getBranch()).size} truncated`,
+        config.truncateMinChars > 0 ? `Retained outputs over ${config.truncateMinChars.toLocaleString()} characters may be truncated to 600 characters plus retrieval marker` : "New retained-output truncation disabled",
         `Cumulative estimated context saved: ${saved ? `~${compactTokens(saved)}` : "0"} tokens`,
         lastStatus,
       ].join("\n"), "info");

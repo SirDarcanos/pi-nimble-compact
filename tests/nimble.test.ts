@@ -9,7 +9,8 @@ import { SessionManager, type ExtensionAPI, type ExtensionContext, type Extensio
 import { injectNimbleEditorStatus, registerNimble } from "../extensions/nimble.ts";
 import {
   applyPruning, candidates, configuration, ENTRY_TYPE, ledger, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
-  affordable, original, reference, requestBody, score, superseded, textOf, type Config, type ToolResult,
+  affordable, affordableReductions, original, reference, requestBody, score, superseded, textOf,
+  truncationLedger, type Config, type ToolResult,
 } from "../src/pruning.ts";
 
 // The payback gate has its own tests; elsewhere it would only obscure which outputs a rule selects.
@@ -77,6 +78,87 @@ function harness(fetcher: typeof fetch = fakeFetch(), settings = config, sm = Se
     },
   };
 }
+
+test("retained long outputs are shortened, retrievable and released by reset", async () => {
+  const h = harness(fakeFetch(0.9));
+  const messages = h.sm.buildSessionContext().messages;
+  const snapshot = structuredClone(h.sm.getBranch());
+  const wanted = candidates(messages, new Set(), 2_000)[0]!;
+  await h.fire("turn_end");
+  assert.equal(ledger(h.sm.getBranch()).size, 0);
+  assert.equal(truncationLedger(h.sm.getBranch()).size, 2);
+  assert.deepEqual(h.sm.getBranch().slice(0, snapshot.length), snapshot);
+  const projected = (await h.fire("context", { messages })).messages;
+  const short = projected.find((m: AgentMessage) => m.role === "toolResult" && m.toolCallId === wanted.result.toolCallId);
+  assert.match(textOf(short), /BEGIN_/);
+  assert.match(textOf(short), /END_/);
+  assert.match(textOf(short), /truncated/);
+  assert.ok(textOf(short).length < 1_000);
+  assert.match(textOf(short), new RegExp(wanted.ref));
+  const page = await h.tools.get("nimble_read")!.execute("retrieve", { ref: wanted.ref, offset: 100, limit: 50 }, undefined, undefined, h.ctx);
+  assert.ok(page.content[0]!.type === "text" && page.content[0].text.endsWith(textOf(wanted.result).slice(100, 150)));
+  const disabled = harness(fakeFetch(0.9), { ...config, truncateMinChars: 0 });
+  await disabled.fire("turn_end");
+  assert.equal(truncationLedger(disabled.sm.getBranch()).size, 0);
+  h.active([]);
+  assert.deepEqual((await h.fire("context", { messages }))?.messages ?? messages, messages);
+  h.active(["nimble_read"]);
+  await h.commands.get("nimble-reset")!.handler("", h.ctx);
+  assert.equal(truncationLedger(h.sm.getBranch()).size, 0);
+  assert.deepEqual((await h.fire("context", { messages })).messages, messages);
+});
+
+test("truncation survives reopen and branch reset without changing stored originals", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-nimble-truncation-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const manager = SessionManager.create("/tmp/pi-nimble-test", dir);
+  const h = harness(fakeFetch(0.9), config, manager);
+  await h.fire("turn_end");
+  const file = manager.getSessionFile()!;
+  const reopened = SessionManager.open(file);
+  assert.equal(truncationLedger(reopened.getBranch()).size, 2);
+  assert.equal(ledger(reopened.getBranch()).size, 0);
+  const ref = [...truncationLedger(reopened.getBranch())][0]!;
+  const stored = original(reopened.getBranch(), ref)!;
+  assert.ok(textOf(stored).length > 4_000);
+  const leaf = reopened.getLeafId()!;
+  reopened.appendCustomEntry(ENTRY_TYPE, { version: 1, refs: [], reset: true });
+  assert.equal(truncationLedger(reopened.getBranch()).size, 0);
+  reopened.branch(leaf);
+  assert.equal(truncationLedger(reopened.getBranch()).size, 2);
+  reopened.appendCustomEntry(ENTRY_TYPE, { version: 1, refs: [ref] });
+  assert.equal(truncationLedger(reopened.getBranch()).has(ref), false);
+  assert.equal(ledger(reopened.getBranch()).has(ref), true);
+});
+
+test("failed truncation persistence rolls back both ledgers", async () => {
+  const h = harness(fakeFetch(0.9));
+  (h.pi as any).appendEntry = (type: string, data: unknown) => {
+    h.sm.appendCustomEntry(type, data);
+    throw new Error("Synthetic persistence failure");
+  };
+  await h.fire("turn_end");
+  assert.equal(ledger(h.sm.getBranch()).size, 0);
+  assert.equal(truncationLedger(h.sm.getBranch()).size, 0);
+});
+
+test("mixed payback preserves clearing, shortening and incremental upgrade semantics", () => {
+  const messages = transcript();
+  const choices = candidates(messages, new Set(), 2_000);
+  const refs = new Set<string>();
+  const clearOnly = affordableReductions(messages, refs, refs, choices, [], 1_000);
+  assert.deepEqual(clearOnly.cleared, affordable(messages, refs, choices, 1_000));
+  const mixed = affordableReductions(messages, refs, refs, [choices[0]!], [choices[1]!], 1_000);
+  assert.equal(mixed.cleared.length, 1);
+  assert.equal(mixed.truncated.length, 1);
+  const oldShort = new Set([choices[0]!.ref]);
+  const upgraded = affordableReductions(messages, refs, oldShort, [choices[0]!], [], 1_000);
+  assert.equal(upgraded.cleared.length, 1);
+  const projected = applyPruning(messages, new Set([choices[0]!.ref]), oldShort);
+  const upgradedResult = projected.find(m => m.role === "toolResult" && m.toolCallId === choices[0]!.result.toolCallId) as ToolResult;
+  assert.match(textOf(upgradedResult), /cleared/);
+  assert.doesNotMatch(textOf(upgradedResult), /BEGIN_/);
+});
 
 test("editor indicator shares the bottom frame without changing its width", () => {
   const stripAnsi = (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
@@ -306,7 +388,9 @@ test("Nimble requests contain bounded excerpts, not private reasoning, images, m
 test("scoring accepts only the documented closed response schema", async () => {
   const messages = transcript(), choices = candidates(messages, new Set(), 2_000);
   assert.equal((await score(messages, choices, config, undefined, fakeFetch())).refs.length, 2);
-  assert.equal((await score(messages, choices, config, undefined, fakeFetch(0.9))).refs.length, 0);
+  const kept = await score(messages, choices, config, undefined, fakeFetch(0.9));
+  assert.equal(kept.refs.length, 0);
+  assert.deepEqual(kept.keptRefs, requestBody(messages, choices, config.model).choices.map(c => c.ref));
   const body = JSON.parse(requestBody(messages, choices, config.model).body);
   const valid = response(body);
   const answer = { type: "noul", noul: 0 };
