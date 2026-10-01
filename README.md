@@ -86,7 +86,7 @@ Environment variables are read when the extension loads. Invalid numeric values 
 | Variable | Default | Meaning / accepted range |
 | --- | --- | --- |
 | `PI_NIMBLE_URL` | `http://127.0.0.1:11434/v1/systemone` | Full decision endpoint; an explicitly empty value disables pruning. |
-| `PI_NIMBLE_MODEL` | `nimble` | Ollama model/tag or alternate server checkpoint ID. |
+| `PI_NIMBLE_MODEL` | `nimble` | Advanced override: Nimble model tag or checkpoint ID; other model families are not supported. |
 | `NIMBLE_API_KEY` | unset | Optional bearer token; not required for local Ollama. |
 | `PI_NIMBLE_THRESHOLD` | `0.45` | Context-window fraction trigger; `0.1`–`0.95`. |
 | `PI_NIMBLE_TRIGGER_TOKENS` | `120000` | Absolute token trigger; `8000`–`2000000`. |
@@ -96,6 +96,8 @@ Environment variables are read when the extension loads. Invalid numeric values 
 | `PI_NIMBLE_TIMEOUT_MS` | `30000` | Scoring deadline in milliseconds; `100`–`180000`. |
 | `PI_NIMBLE_TRUNCATE_MIN_CHARS` | `4000` | Shorten explicitly retained outputs above this length; `0` disables new truncation, maximum `2000000`. |
 
+Leave `PI_NIMBLE_MODEL` unset for the default `ollama pull nimble` setup. Override it only to select another Nimble tag (such as `nimble:q8_0`) or a checkpoint ID used by your Nimble server.
+
 To stop new truncation, set `PI_NIMBLE_TRUNCATE_MIN_CHARS=0`. Existing truncation decisions persist until `/nimble-reset`. To disable pruning entirely on the next launch:
 
 ```sh
@@ -104,7 +106,7 @@ PI_NIMBLE_URL="" pi
 
 ### Alternate Nimble server
 
-For a separately deployed server, follow [Nimble's serving guide](https://github.com/bespokelabsai/nimble/blob/main/docs/MODAL_SERVING.md) and set both its endpoint and model:
+For a separately deployed server, follow [Nimble's serving guide](https://github.com/bespokelabsai/nimble/blob/main/docs/MODAL_SERVING.md) and set its endpoint and Nimble checkpoint ID:
 
 ```sh
 export PI_NIMBLE_URL="http://127.0.0.1:8000/v1/systemone"
