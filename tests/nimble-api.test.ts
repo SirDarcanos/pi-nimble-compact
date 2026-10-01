@@ -62,6 +62,34 @@ test("Pi uses the original engine's whole-history fitting within Nimble request 
   assert.equal(body.model, "nimble");
 });
 
+test("long tool histories fit without losing candidate metadata or user constraints", async () => {
+  const messages = history();
+  const choices = candidates(messages, new Set(), config.keepRecentTokens);
+  const assistant = messages[1] as Extract<AgentMessage, { role: "assistant" }>;
+  const result = messages[2] as Extract<AgentMessage, { role: "toolResult" }>;
+  const extra = Array.from({ length: 150 }, (_, i): AgentMessage[] => [
+    { ...assistant, content: [{ type: "toolCall", id: `extra-${i}`, name: "read", arguments: { path: `module-${i}.ts` } }] },
+    { ...result, toolCallId: `extra-${i}`, toolName: "read", content: [{ type: "text", text: "small" }] },
+  ]).flat();
+  messages.splice(3, 0, ...extra);
+  const snapshot = structuredClone(messages);
+  let called = false;
+  await score(messages, choices, config, undefined, (async (_url, init) => {
+    called = true;
+    const body = JSON.parse(String(init?.body));
+    assert.ok(estimateTokens(JSON.stringify(body.state.conversation)) <= 2_000);
+    assert.ok(estimateTokens(String(init?.body)) <= MAX_REQUEST_TOKENS);
+    assert.ok(Buffer.byteLength(String(init?.body)) <= MAX_REQUEST_BYTES);
+    assert.match(JSON.stringify(body.state.conversation), /Never change the public parser API/);
+    assert.match(JSON.stringify(body.state.conversation), /git log -p/);
+    assert.doesNotMatch(JSON.stringify(body.state.conversation), /module-149/);
+    return Response.json({ model: "nimble", answers: { r0: { type: "noul", noul: 0.9 } },
+      usage: { input_tokens: 100, output_tokens: 1 } });
+  }) as typeof fetch);
+  assert.ok(called);
+  assert.deepEqual(messages, snapshot);
+});
+
 test("real HTTP transport works with a keyless Nimble-compatible server and checkpoint model ID", async t => {
   const messages = history();
   const choices = candidates(messages, new Set(), config.keepRecentTokens);

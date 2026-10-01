@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `/nimble-compact` runs output pruning on demand while preserving evidence protections and the cache-payback gate.
+
+### Fixed
+
+- Keep unrelated historical tool calls from exhausting Nimble's scoring-history budget, and stop showing Ollama setup advice for unrelated failures.
+
 ## [0.1.0] - 2026-10-01
 
 First release.

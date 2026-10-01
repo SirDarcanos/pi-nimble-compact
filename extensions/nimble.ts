@@ -180,7 +180,7 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   pi.on("session_before_compact", (_event, ctx) => { reset(); updateStatus(ctx); });
   pi.on("session_compact", (_event, ctx) => { reset(); updateStatus(ctx); });
 
-  const startEvaluation = (ctx: ExtensionContext): void => {
+  const startEvaluation = (ctx: ExtensionContext, manual = false): Promise<void> | undefined => {
     if (!config.endpoint || controller || !ctx.model || !pi.getActiveTools().includes("nimble_read")) return;
     const branch = ctx.sessionManager.getBranch();
     if (nativeCheckpoint(branch)) return;
@@ -191,8 +191,8 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
     // Measure what the next request carries: cleared outputs no longer count, so clearing is its own hysteresis.
     const projectedTokens = applyPruning(messages, refs, truncatedRefs).reduce((sum, message) => sum + estimateTokens(message), 0);
     const usageTokens = ctx.getContextUsage()?.tokens ?? 0;
-    if (Math.max(projectedTokens, usageTokens) < triggerTokens(config, ctx.model.contextWindow)) return;
-    if (rawTokens >= lastAttemptTokens && rawTokens - lastAttemptTokens < GROWTH_TOKENS) return;
+    if (!manual && Math.max(projectedTokens, usageTokens) < triggerTokens(config, ctx.model.contextWindow)) return;
+    if (!manual && rawTokens >= lastAttemptTokens && rawTokens - lastAttemptTokens < GROWTH_TOKENS) return;
     lastAttemptTokens = rawTokens;
     const choices = candidates(messages, refs, config.keepRecentTokens);
     if (!choices.length) { lastStatus = "No old eligible outputs"; return; }
@@ -205,7 +205,7 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
     const snapshotLeaf = ctx.sessionManager.getLeafId();
     updateStatus(ctx);
 
-    void (async () => {
+    return (async () => {
       try {
         const result = uncertain.length
           ? await score(applyPruning(messages, refs, truncatedRefs), uncertain, config, ownController.signal, options.fetch)
@@ -256,10 +256,7 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
       } catch (error) {
         if (epoch !== ownEpoch || ownController.signal.aborted) return;
         lastStatus = error instanceof Error ? error.message : "Nimble unavailable";
-        if (config.endpoint === "http://127.0.0.1:11434/v1/systemone") {
-          lastStatus += "; use Ollama 0.35+, start Ollama, and run ollama pull nimble";
-        }
-        if (!warned && ctx.hasUI) ctx.ui.notify(`pi-nimble: ${lastStatus}. Context unchanged; normal compaction remains available.`, "warning");
+        if (!manual && !warned && ctx.hasUI) ctx.ui.notify(`pi-nimble: ${lastStatus}. Context unchanged; normal compaction remains available.`, "warning");
         warned = true;
       } finally {
         if (controller === ownController) controller = undefined;
@@ -283,6 +280,29 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   pi.on("turn_end", (_event, ctx) => {
     updateStatus(ctx);
     startEvaluation(ctx);
+  });
+
+  pi.registerCommand("nimble-compact", {
+    description: "Run Nimble output pruning now, bypassing the automatic trigger and cooldown",
+    handler: async (args, ctx) => {
+      const notify = (message: string, warning = false) => {
+        if (ctx.hasUI) ctx.ui.notify(`pi-nimble: ${message}`, warning ? "warning" : "info");
+      };
+      if (args.trim()) { notify("Usage: /nimble-compact", true); return; }
+      await ctx.waitForIdle();
+      if (!config.endpoint) { notify("Pruning disabled by an empty PI_NIMBLE_URL", true); return; }
+      if (!ctx.model) { notify("No model selected", true); return; }
+      if (!pi.getActiveTools().includes("nimble_read")) { notify("Paused: nimble_read must be active", true); return; }
+      if (nativeCheckpoint(ctx.sessionManager.getBranch())) {
+        notify("Paused: Codex checkpoint owns provider context", true); return;
+      }
+      if (controller) { notify("An evaluation is already running", true); return; }
+      const ownEpoch = epoch;
+      await startEvaluation(ctx, true);
+      if (epoch !== ownEpoch) { notify("Evaluation cancelled by a session or compaction change"); return; }
+      notify(`${lastStatus}${warned ? ". Context unchanged; normal compaction remains available." : ""}`, warned);
+      updateStatus(ctx);
+    },
   });
 
   pi.registerTool({
