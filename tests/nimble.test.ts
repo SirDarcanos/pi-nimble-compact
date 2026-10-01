@@ -79,6 +79,99 @@ function harness(fetcher: typeof fetch = fakeFetch(), settings = config, sm = Se
   };
 }
 
+test("manual pruning bypasses pressure and cooldown and reports completed results", async () => {
+  let requests = 0;
+  const h = harness(fakeFetch(0.9, () => { requests++; }), { ...config, truncateMinChars: 0 });
+  h.pressure(1);
+  (h.ctx as any).waitForIdle = async () => {};
+  await h.fire("turn_end");
+  assert.equal(requests, 0);
+  const command = h.commands.get("nimble-compact");
+  assert.ok(command);
+  await command.handler("", h.ctx);
+  assert.equal(requests, 1);
+  assert.match(h.notices.at(-1)!, /0\/2 outputs cleared/);
+  await command.handler("", h.ctx);
+  assert.equal(requests, 2, "manual retries bypass the growth cooldown");
+});
+
+test("manual pruning persists masks without changing saved evidence", async () => {
+  const h = harness();
+  h.pressure(1);
+  (h.ctx as any).waitForIdle = async () => {};
+  const messages = h.sm.buildSessionContext().messages;
+  await h.commands.get("nimble-compact")!.handler("", h.ctx);
+  assert.equal(ledger(h.sm.getBranch()).size, 2);
+  assert.deepEqual(h.sm.buildSessionContext().messages, messages);
+  const projected = await h.fire("context", { messages });
+  assert.match(textOf(projected.messages[2]), /cleared from context/);
+});
+
+test("manual pruning reports disabled, paused, busy and empty states", async () => {
+  for (const state of ["disabled", "retrieval", "checkpoint", "empty"]) {
+    let requests = 0;
+    const h = harness(fakeFetch(0.1, () => { requests++; }), state === "disabled" ? { ...config, endpoint: "" } : config);
+    (h.ctx as any).waitForIdle = async () => {};
+    if (state === "retrieval") h.active([]);
+    if (state === "checkpoint") h.sm.appendCompaction("native checkpoint", h.sm.getBranch()[0]!.id, 100_000,
+      { kind: "openai-codex-native-compaction" }, true);
+    if (state === "empty") h.pi.appendEntry(ENTRY_TYPE, { version: 1,
+      refs: candidates(h.sm.buildSessionContext().messages, new Set(), config.keepRecentTokens).map(item => item.ref) });
+    await h.commands.get("nimble-compact")!.handler("", h.ctx);
+    assert.equal(requests, 0);
+    assert.match(h.notices.at(-1)!, /disabled|nimble_read|checkpoint|No old eligible/);
+  }
+  let release!: () => void;
+  const h = harness((async (_url, init) => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return Response.json(response(JSON.parse(String(init?.body))));
+  }) as typeof fetch);
+  (h.ctx as any).waitForIdle = async () => {};
+  await h.fire("turn_end");
+  await h.commands.get("nimble-compact")!.handler("", h.ctx);
+  assert.match(h.notices.at(-1)!, /already running/);
+  release();
+  await new Promise<void>(resolve => setImmediate(resolve));
+});
+
+test("manual pruning retains the payback gate and recent-output protection", async () => {
+  const gated = harness(fakeFetch(), { ...config, maxPaybackTurns: 1 });
+  (gated.ctx as any).waitForIdle = async () => {};
+  await gated.commands.get("nimble-compact")!.handler("", gated.ctx);
+  assert.equal(ledger(gated.sm.getBranch()).size, 0);
+  assert.match(gated.notices.at(-1)!, /deferred/);
+  let fetched = false;
+  const recent = harness(fakeFetch(0.1, () => { fetched = true; }), { ...config, keepRecentTokens: 100_000 });
+  (recent.ctx as any).waitForIdle = async () => {};
+  await recent.commands.get("nimble-compact")!.handler("", recent.ctx);
+  assert.equal(fetched, false);
+  assert.match(recent.notices.at(-1)!, /No old eligible outputs/);
+});
+
+test("manual pruning reports scoring failures without applying masks", async () => {
+  const h = harness((async () => new Response("error", { status: 503 })) as typeof fetch);
+  (h.ctx as any).waitForIdle = async () => {};
+  await h.commands.get("nimble-compact")!.handler("", h.ctx);
+  assert.equal(ledger(h.sm.getBranch()).size, 0);
+  assert.equal(h.notices.length, 1);
+  assert.match(h.notices[0], /Nimble HTTP 503/);
+});
+
+test("local history-budget failures stay closed without Ollama setup advice", async () => {
+  let fetched = false;
+  const h = harness((async () => { fetched = true; throw new Error("Unexpected fetch"); }) as typeof fetch,
+    { ...config, endpoint: configuration({}).endpoint });
+  for (let i = 0; i < 3; i++) h.sm.appendMessage({ role: "user", content: ";".repeat(3_000), timestamp: 30 + i });
+  const messages = h.sm.buildSessionContext().messages;
+  await h.fire("turn_end");
+  assert.equal(fetched, false);
+  assert.equal(h.notices.length, 1);
+  assert.match(h.notices[0], /history too large for Nimble/);
+  assert.doesNotMatch(h.notices[0], /Ollama|ollama pull/);
+  assert.equal(ledger(h.sm.getBranch()).size, 0);
+  assert.deepEqual(h.sm.buildSessionContext().messages, messages);
+});
+
 test("retained long outputs are shortened, retrievable and released by reset", async () => {
   const h = harness(fakeFetch(0.9));
   const messages = h.sm.buildSessionContext().messages;

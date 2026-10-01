@@ -62,8 +62,11 @@ Complete originals remain in Pi's on-disk session history. Closing Pi, starting 
 | Command or tool | Purpose |
 | --- | --- |
 | `/nimble-status` | Show configuration, the last evaluation, branch-local mask counts, and cumulative estimated context removed. |
+| `/nimble-compact` | Run one pruning pass now, bypassing the automatic pressure trigger and cooldown, and report the result. |
 | `/nimble-reset` | Release clearing and truncation on the active branch without deleting originals. |
 | `nimble_read` | Let the model retrieve original cleared or truncated tool output using the reference in its marker. |
+
+`/nimble-compact` waits for the agent to become idle and runs the same scoring and persistence path as automatic pruning. Recent-output protection, candidate exclusions, and the cache-payback gate still apply, so a pass may remove nothing. An existing evaluation is reported rather than duplicated. Changes affect the next model request; this command does not create a summary or invoke Pi's `/compact`.
 
 A cleared result looks like this:
 

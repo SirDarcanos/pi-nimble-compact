@@ -340,14 +340,16 @@ function excerpt(text: string, limit: number): string {
 export function requestBody(messages: readonly AgentMessage[], choices: readonly Candidate[], model: string): {
   body: string; choices: Candidate[];
 } {
-  // Use fast-jev-compaction's staged whole-history fitter, but never upload
-  // thinking, signatures, custom messages, sensitive calls, or full outputs.
+  // Keep conversation prose, but only duplicate call metadata for the outputs
+  // being scored. Unrelated calls otherwise grow without bound even after the
+  // fitter has collapsed their inputs. Full outputs stay in session history.
+  const scoringIds = new Set(choices.map(item => item.result.toolCallId));
   const history: Message[] = messages.flatMap((message): Message[] => {
     if (message.role === "user") return [{ role: "user", text: redactSecrets(typeof message.content === "string"
       ? message.content : message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")), toolUses: [] }];
     if (message.role === "assistant") return [{ role: "assistant",
       text: redactSecrets(message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")),
-      toolUses: message.content.flatMap(part => part.type === "toolCall" && record(part.arguments)
+      toolUses: message.content.flatMap(part => part.type === "toolCall" && scoringIds.has(part.id) && record(part.arguments)
         && !PROTECTED_TOOLS.test(part.name) && !SUPERSEDE_ONLY_TOOLS.has(part.name) && !sensitiveInput(part.arguments)
         ? [{ tool_use_id: part.id, tool: part.name, input: redactValue(part.arguments) as Record<string, unknown> }] : []) }];
     if (message.role === "toolResult") return [{ role: "user", text: "", toolUses: [],
