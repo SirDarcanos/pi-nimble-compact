@@ -26,7 +26,7 @@ Check `ollama --version`, then start the Ollama app or service. If you run the s
 
 ```sh
 ollama pull nimble
-pi install git:github.com/SirDarcanos/pi-nimble-compact
+pi install npm:pi-nimble-compact
 pi
 ```
 
