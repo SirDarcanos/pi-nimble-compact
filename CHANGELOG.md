@@ -9,4 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First release.
 
+### Added
+
+- CI checks and a documented stable-release publishing process using npm trusted publishing.
+
+### Changed
+
+- Use the unscoped npm package name `pi-nimble-compact`.
+
 [unreleased]: https://github.com/SirDarcanos/pi-nimble-compact/commits/main/
