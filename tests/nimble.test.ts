@@ -90,7 +90,7 @@ test("manual pruning bypasses pressure and cooldown and reports completed result
   assert.ok(command);
   await command.handler("", h.ctx);
   assert.equal(requests, 1);
-  assert.match(h.notices.at(-1)!, /0\/2 outputs cleared/);
+  assert.match(h.notices.at(-1)!, /No additional changes \(2 outputs evaluated\)/);
   await command.handler("", h.ctx);
   assert.equal(requests, 2, "manual retries bypass the growth cooldown");
 });
@@ -566,7 +566,7 @@ test("automatic hook flow persists only masks and retrieval returns exact paged 
   const originalEntries = structuredClone(h.sm.getBranch());
   const wanted = candidates(messages, new Set(), 2_000)[0]!;
   await h.fire("turn_end");
-  assert.match(h.statuses.at(-1)!, /^Nimble: 70\.0% · ~[\d.]+k saved$/);
+  assert.match(h.statuses.at(-1)!, /^Nimble: 70\.0% · ~[\d.]+k tokens removed so far$/);
   assert.equal(requests, 1);
   assert.deepEqual(h.sm.getBranch().slice(0, originalEntries.length), originalEntries);
   assert.equal(ledger(h.sm.getBranch()).size, 2);
@@ -581,8 +581,36 @@ test("automatic hook flow persists only masks and retrieval returns exact paged 
   await h.fire("context", { messages }); await h.fire("turn_end");
   assert.equal(requests, 1, "no network from context or unchanged turns");
   await h.commands.get("nimble-status")!.handler("", h.ctx);
-  assert.match(h.notices.at(-1)!, /Cumulative estimated context saved: ~[\d.]+k tokens/);
+  assert.match(h.notices.at(-1)!, /Session total: ~[\d.]+k estimated tokens removed from context so far \(not billing savings\)/);
+  assert.match(h.notices.at(-1)!, /Active on this branch: 0 outputs shortened; 2 cleared/);
+  assert.match(h.notices.at(-1)!, /Latest activity: 2 outputs cleared; 0 shortened; ~[\d,]+ estimated tokens removed \(2 outputs evaluated\)/);
   assert.equal(h.handlers.has("session_before_compact"), true, "background scoring is cancelled before normal compaction mutates the branch");
+});
+
+test("status separates prior shortening from a latest deferred pass", async () => {
+  const settings = { ...config };
+  const h = harness(fakeFetch(0.9), settings);
+  (h.ctx as any).waitForIdle = async () => {};
+  await h.commands.get("nimble-status")!.handler("", h.ctx);
+  assert.match(h.notices.at(-1)!, /Latest activity: No evaluation yet/);
+  await h.commands.get("nimble-compact")!.handler("", h.ctx);
+  assert.equal(truncationLedger(h.sm.getBranch()).size, 2);
+  await h.commands.get("nimble-status")!.handler("", h.ctx);
+  const total = h.notices.at(-1)!.split("\n").find(line => line.startsWith("Session total:"))!;
+  assert.match(total, /~[\d.]+k estimated tokens removed/);
+  assert.match(h.notices.at(-1)!, /Latest activity: 0 outputs cleared; 2 shortened/);
+
+  settings.maxPaybackTurns = 1;
+  for (const message of [...pair("later"), {
+    role: "user" as const, content: "Current task ".repeat(1_000), timestamp: 5,
+  }]) h.sm.appendMessage(message);
+  await h.commands.get("nimble-compact")!.handler("", h.ctx);
+  await h.commands.get("nimble-status")!.handler("", h.ctx);
+  const status = h.notices.at(-1)!;
+  assert.ok(status.includes(total), "a no-op pass preserves cumulative totals");
+  assert.match(status, /Active on this branch: 2 outputs shortened; 0 cleared/);
+  assert.match(status, /Latest activity: No additional changes \(3 outputs evaluated\); 1 reductions deferred to preserve prompt-cache efficiency/);
+  assert.doesNotMatch(status, /0 truncated|~0 context tokens removed/);
 });
 
 test("branch-local reset releases masks append-only and keeps original evidence", async () => {
@@ -593,7 +621,7 @@ test("branch-local reset releases masks append-only and keeps original evidence"
   const maskedLeaf = h.sm.getLeafId()!;
   const entriesBefore = h.sm.getBranch().length;
   assert.equal(ledger(h.sm.getBranch()).size, 2);
-  const cumulativeSaved = /~[\d.]+k saved$/.exec(h.statuses.at(-1)!)![0];
+  const cumulativeSaved = /~[\d.]+k tokens removed so far$/.exec(h.statuses.at(-1)!)![0];
 
   await h.commands.get("nimble-reset")!.handler("", h.ctx);
   const resetLeaf = h.sm.getLeafId()!;
@@ -619,12 +647,12 @@ test("pressure, missing endpoint, disabled retrieval, null usage and all-keep co
   h.pressure(44_999); await h.fire("turn_end"); assert.equal(calls, 0);
   h.pressure(null); await h.fire("turn_end"); assert.equal(calls, 0);
   h.pressure(47_600); h.active([]); await h.fire("turn_end"); assert.equal(calls, 0);
-  assert.equal(h.statuses.at(-1), "Nimble: paused · 0 saved · nimble_read inactive");
+  assert.equal(h.statuses.at(-1), "Nimble: paused · 0 tokens removed so far · nimble_read inactive");
   h.active(["nimble_read"]); await h.fire("turn_end"); await h.fire("turn_end"); assert.equal(calls, 1);
   assert.equal(ledger(h.sm.getBranch()).size, 0);
   const missing = harness(fakeFetch(0, () => calls++), { ...config, endpoint: "" });
   await missing.fire("session_start"); await missing.fire("turn_end");
-  assert.equal(missing.statuses.at(-1), "Nimble: dormant · 0 saved");
+  assert.equal(missing.statuses.at(-1), "Nimble: dormant · 0 tokens removed so far");
   assert.equal(await missing.fire("context", { messages: transcript() }), undefined);
   assert.equal(calls, 1);
 });
@@ -761,7 +789,7 @@ test("failures and failed persistence commit no new pruning", async () => {
   persist.pi.appendEntry = () => { throw new Error("disk unavailable"); };
   await persist.fire("turn_end");
   assert.equal(ledger(persist.sm.getBranch()).size, 0);
-  assert.match(persist.statuses.at(-1)!, /0 saved/, "failed persistence is not counted as savings");
+  assert.match(persist.statuses.at(-1)!, /0 tokens removed so far/, "failed persistence is not counted as savings");
   const release = harness();
   await release.fire("turn_end");
   release.pi.appendEntry = (type: string, data: unknown) => {
@@ -780,8 +808,8 @@ test("restart and branch navigation recover only branch-local masks and evidence
   const prunedLeaf = h.sm.getLeafId()!;
   await h.fire("session_start");
   assert.equal(ledger(h.sm.getBranch()).size, 2);
-  assert.match(h.statuses.at(-1)!, /saved$/);
-  const cumulativeSaved = /~[\d.]+k saved$/.exec(h.statuses.at(-1)!)![0];
+  assert.match(h.statuses.at(-1)!, /tokens removed so far$/);
+  const cumulativeSaved = /~[\d.]+k tokens removed so far$/.exec(h.statuses.at(-1)!)![0];
   assert.equal(original(h.sm.getBranch(), target.ref), target.result);
   h.sm.branch(forkPoint); await h.fire("session_tree");
   assert.equal(ledger(h.sm.getBranch()).size, 0);

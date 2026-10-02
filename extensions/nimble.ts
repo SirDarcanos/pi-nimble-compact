@@ -101,7 +101,7 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   let epoch = 0;
   let lastStatus = "No evaluation yet";
   let warned = false;
-  let barLabel = `${config.endpoint ? "Nimble ready" : "Nimble dormant"} · 0 saved`;
+  let barLabel = `${config.endpoint ? "Nimble ready" : "Nimble dormant"} · 0 tokens removed so far`;
   let editorTui: { requestRender(): void } | undefined;
   let editorInstalled = false;
 
@@ -123,7 +123,7 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
 
   const updateStatus = (ctx: ExtensionContext) => {
     const saved = cumulativeClearedTokens(ctx.sessionManager.getEntries());
-    const savings = `${saved ? `~${compactTokens(saved)}` : "0"} saved`;
+    const savings = `${saved ? `~${compactTokens(saved)}` : "0"} tokens removed so far`;
     const active = pi.getActiveTools().includes("nimble_read");
     const state = !config.endpoint ? "Nimble dormant"
       : !active || nativeCheckpoint(ctx.sessionManager.getBranch()) ? "Nimble paused"
@@ -250,8 +250,10 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
             throw error;
           }
         }
-        lastStatus = `${cleared.length}/${choices.length} outputs cleared; ${truncated.length} truncated; ~${saved.toLocaleString()} context tokens removed`
-          + (deferred ? `; ${deferred} deferred until a larger batch repays the cache rewrite` : "");
+        lastStatus = cleared.length || truncated.length
+          ? `${cleared.length} outputs cleared; ${truncated.length} shortened; ~${saved.toLocaleString()} estimated tokens removed (${choices.length} outputs evaluated)`
+          : `No additional changes (${choices.length} outputs evaluated)`;
+        if (deferred) lastStatus += `; ${deferred} reductions deferred to preserve prompt-cache efficiency`;
         warned = false;
       } catch (error) {
         if (epoch !== ownEpoch || ownController.signal.aborted) return;
@@ -370,10 +372,10 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
         !pi.getActiveTools().includes("nimble_read") ? "Paused: nimble_read is inactive"
           : nativeCheckpoint(ctx.sessionManager.getBranch()) ? "Paused: Codex checkpoint owns provider context; retrieval active"
           : "Retrieval active",
-        `${ledger(ctx.sessionManager.getBranch()).size} cleared outputs on this branch; ${truncationLedger(ctx.sessionManager.getBranch()).size} truncated`,
+        `Active on this branch: ${truncationLedger(ctx.sessionManager.getBranch()).size} outputs shortened; ${ledger(ctx.sessionManager.getBranch()).size} cleared`,
         config.truncateMinChars > 0 ? `Retained outputs over ${config.truncateMinChars.toLocaleString()} characters may be truncated to 600 characters plus retrieval marker` : "New retained-output truncation disabled",
-        `Cumulative estimated context saved: ${saved ? `~${compactTokens(saved)}` : "0"} tokens`,
-        lastStatus,
+        `Session total: ${saved ? `~${compactTokens(saved)}` : "0"} estimated tokens removed from context so far (not billing savings)`,
+        `Latest activity: ${lastStatus}`,
       ].join("\n"), "info");
     },
   });

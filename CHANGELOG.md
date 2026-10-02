@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-02
+
+### Fixed
+
+- Separate cumulative token reductions, active branch reductions, and latest activity in Nimble status so a deferred pass no longer obscures earlier work; clarify that token totals are estimates, not billing savings.
+
 ## [0.2.0] - 2026-10-01
 
 ### Added
@@ -33,6 +39,7 @@ First release.
 
 - Use the unscoped npm package name `pi-nimble-compact`.
 
-[unreleased]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/SirDarcanos/pi-nimble-compact/releases/tag/v0.1.0
