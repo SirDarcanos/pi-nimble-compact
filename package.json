@@ -1,6 +1,6 @@
 {
   "name": "pi-nimble-compact",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Automatic Nimble context clearing for Pi. Keep the conversation, prune stale tool output, retrieve originals without rerunning commands.",
   "type": "module",
   "license": "MIT",

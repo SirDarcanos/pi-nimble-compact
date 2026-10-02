@@ -61,7 +61,7 @@ Complete originals remain in Pi's on-disk session history. Closing Pi, starting 
 
 | Command or tool | Purpose |
 | --- | --- |
-| `/nimble-status` | Show configuration, the last evaluation, branch-local mask counts, and cumulative estimated context removed. |
+| `/nimble-status` | Show configuration, active branch reductions, cumulative session totals, and the latest activity separately. |
 | `/nimble-compact` | Run one pruning pass now, bypassing the automatic pressure trigger and cooldown, and report the result. |
 | `/nimble-reset` | Release clearing and truncation on the active branch without deleting originals. |
 | `nimble_read` | Let the model retrieve original cleared or truncated tool output using the reference in its marker. |
@@ -77,7 +77,7 @@ Retrieve with nimble_read({"ref":"…"}). Do not rerun a side-effecting command 
 
 For both tiers, the model uses the marker's actual `ref`. Optional `offset` and `limit` are **character counts**: offset starts at 0, pages default to 8,000 characters, and each page is capped at 16,000. Retrieval reads the saved output even if the source file has since changed.
 
-Interactive Pi shows `ready`, `checking…`, `paused`, `dormant`, or `error` alongside estimated context saved. This cumulative estimate is not a billing-savings counter and is not reset by branch navigation, reloads, or `/nimble-reset`.
+Interactive Pi shows `ready`, `checking…`, `paused`, `dormant`, or `error` alongside estimated tokens removed so far. `/nimble-status` separates the cumulative session total, reductions active on this branch, and the latest activity. A pass with no additional changes does not undo earlier reductions; deferred reductions wait for a batch large enough to justify rewriting the prompt cache. Token counts use Pi's rough estimate (approximately one token per four characters), not the active model's exact tokenizer. The cumulative estimate is not a billing-savings counter and is not reset by branch navigation, reloads, or `/nimble-reset`.
 
 > [!WARNING]
 > Keep `nimble_read` enabled in tool allowlists. Disabling it restores full projected outputs and pauses new pruning. Avoid loading another general-purpose context-pruning extension alongside this one. Provider-native Codex checkpoints also pause pruning on their branch; retrieval remains available.
