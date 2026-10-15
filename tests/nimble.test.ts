@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { JsonObject } from "@earendil-works/pi-ai";
 import { SessionManager, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { injectNimbleEditorStatus, registerNimble } from "../extensions/nimble.ts";
+import { registerNimble } from "../extensions/nimble.ts";
 import {
   applyPruning, candidates, configuration, ENTRY_TYPE, ledger, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
   affordable, affordableReductions, original, reference, requestBody, score, superseded, textOf,
@@ -54,11 +54,15 @@ function harness(fetcher: typeof fetch = fakeFetch(), settings = config, sm = Se
   const commands = new Map<string, { handler(args: string, ctx: ExtensionContext): Promise<void> }>();
   const notices: string[] = [];
   const statuses: string[] = [];
+  const statusUpdates: { key: string; text: string | undefined }[] = [];
   let pressure: number | null = 70_000;
   let active = ["nimble_read"];
   const ctx = {
     sessionManager: sm, model: { contextWindow: 100_000 }, getContextUsage: () => pressure === null ? null : ({ tokens: pressure }),
-    hasUI: true, ui: { notify: (text: string) => notices.push(text), setStatus(_id: string, text?: string) { if (text) statuses.push(text); } },
+    hasUI: true, ui: { notify: (text: string) => notices.push(text), setStatus(key: string, text?: string) {
+      statusUpdates.push({ key, text });
+      if (text) statuses.push(text);
+    } },
     tools: [], executeTool: async () => { throw new Error("Unexpected nested tool call in fixture"); },
   } as unknown as ExtensionToolContext;
   const pi = {
@@ -68,7 +72,7 @@ function harness(fetcher: typeof fetch = fakeFetch(), settings = config, sm = Se
     registerCommand(name: string, command: { handler(args: string, ctx: ExtensionContext): Promise<void> }) { commands.set(name, command); }, getActiveTools() { return active; },
   } as unknown as ExtensionAPI;
   registerNimble(pi, { config: settings, fetch: fetcher });
-  return { sm, handlers, tools, commands, notices, statuses, ctx, pi,
+  return { sm, handlers, tools, commands, notices, statuses, statusUpdates, ctx, pi,
     pressure(value: number | null) { pressure = value; }, active(value: string[]) { active = value; },
     async fire(type: string, event: any = {}) {
       let result: any;
@@ -253,19 +257,34 @@ test("mixed payback preserves clearing, shortening and incremental upgrade seman
   assert.doesNotMatch(textOf(upgradedResult), /BEGIN_/);
 });
 
-test("editor indicator shares the bottom frame without changing its width", () => {
-  const stripAnsi = (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-  const lines = [
-    `\x1b[31m┏${"━".repeat(42)}┓\x1b[0m`,
-    "input",
-    `\x1b[31m┗${"━".repeat(28)}\x1b[0m xhigh \x1b[31m━┛\x1b[0m`,
-  ];
-  const framed = injectNimbleEditorStatus(lines, "Nimble ~18k", text => `\x1b[2m${text}\x1b[0m`);
-  assert.equal(framed[0], lines[0]);
-  assert.equal(framed[1], lines[1]);
-  assert.equal(stripAnsi(framed[2]!).length, stripAnsi(lines[2]!).length);
-  assert.match(stripAnsi(framed[2]!), /Nimble ~18k · .*xhigh/);
-  assert.deepEqual(injectNimbleEditorStatus(["top", "┗━━┛"], "Nimble ready"), ["top", "┗━━┛"]);
+test("TUI publishes and clears footer status without accessing or replacing the editor", async () => {
+  const h = harness();
+  (h.ctx as any).mode = "tui";
+  Object.assign(h.ctx.ui, {
+    getEditorComponent() { assert.fail("Nimble must not inspect the editor"); },
+    setEditorComponent() { assert.fail("Nimble must not replace the editor"); },
+    setFooter() { assert.fail("Nimble must not replace the theme's footer"); },
+  });
+  h.pressure(1);
+  await h.fire("session_start");
+  assert.match(h.statuses.at(-1)!, /^Nimble: .* · 0 tokens removed so far$/);
+  assert.equal(h.statusUpdates.at(-1)!.key, "pi-nimble");
+  h.active([]);
+  await h.fire("turn_end");
+  assert.match(h.statuses.at(-1)!, /paused.*nimble_read inactive/);
+  await h.fire("session_shutdown");
+  assert.deepEqual(h.statusUpdates.at(-1), { key: "pi-nimble", text: undefined });
+});
+
+test("headless lifecycle does not publish UI status", async () => {
+  const h = harness();
+  (h.ctx as any).hasUI = false;
+  (h.ctx as any).mode = "print";
+  h.pressure(1);
+  await h.fire("session_start");
+  await h.fire("turn_end");
+  await h.fire("session_shutdown");
+  assert.deepEqual(h.statusUpdates, []);
 });
 
 test("candidate selection protects recent batches, errors, skills, images, tool loading, coordination and ambiguous pairs", () => {
