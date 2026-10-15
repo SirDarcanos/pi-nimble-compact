@@ -1,16 +1,11 @@
 import { Type } from "typebox";
 import {
-  CustomEditor, buildSessionContext, estimateTokens, type ExtensionAPI, type ExtensionContext, type SessionEntry, type SessionManager,
+  buildSessionContext, estimateTokens, type ExtensionAPI, type ExtensionContext, type SessionEntry, type SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
   affordableReductions, applyPruning, candidates, configuration, ENTRY_TYPE, GROWTH_TOKENS,
   ledger, original, score, superseded, textOf, triggerTokens, truncationLedger, type Config,
 } from "../src/pruning.ts";
-
-const EDITOR_COMPONENT_CHANGED_EVENT = "ui-pack:v1:editor-component-changed";
-const NIMBLE_EDITOR_FACTORY = "__piNimbleEditorFactory";
-const NIMBLE_EDITOR_LISTENER = Symbol.for("pi-nimble.editorChangedListener");
-const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
 function nativeCheckpoint(branch: readonly SessionEntry[]): boolean {
   const latest = branch.findLast(entry => entry.type === "compaction"
@@ -18,55 +13,6 @@ function nativeCheckpoint(branch: readonly SessionEntry[]): boolean {
   return latest?.type === "custom" || (latest?.type === "compaction"
     && (latest.details as { kind?: unknown } | undefined)?.kind === "openai-codex-native-compaction");
 }
-type EditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>>;
-type EditorInstance = ReturnType<EditorFactory>;
-interface MarkedEditorFactory extends Function { __piNimbleEditorFactory?: true; }
-
-function isNimbleEditorFactory(value: unknown): boolean {
-  return typeof value === "function" && (value as MarkedEditorFactory).__piNimbleEditorFactory === true;
-}
-
-export function injectNimbleEditorStatus(
-  lines: readonly string[], label: string, style: (text: string) => string = text => text,
-): string[] {
-  let bottom = -1;
-  for (let i = lines.length - 1; i > 0; i--) {
-    const plain = lines[i]!.replace(ANSI, "");
-    if (/^[╰└┗][─━]+/.test(plain) || /^[─━]+$/.test(plain)) { bottom = i; break; }
-  }
-  if (bottom < 0) return [...lines];
-
-  const text = ` ${label} · `;
-  const line = lines[bottom]!;
-  const run = /(─+|━+)/.exec(line);
-  if (!run || run[0].length <= text.length + 1) return [...lines];
-
-  const output = [...lines];
-  output[bottom] = line.slice(0, run.index)
-    + run[0].slice(0, -text.length) + style(text)
-    + line.slice(run.index + run[0].length);
-  return output;
-}
-
-function editorWithStatus(
-  inner: EditorInstance,
-  label: () => string,
-  theme: ExtensionContext["ui"]["theme"],
-): EditorInstance {
-  return new Proxy(inner, {
-    get(target, property) {
-      if (property === "render") {
-        return (width: number) => injectNimbleEditorStatus(
-          target.render(width), label(), text => theme.fg("muted", text),
-        );
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-    set: (target, property, value) => Reflect.set(target, property, value, target),
-  });
-}
-
 function cumulativeClearedTokens(entries: readonly SessionEntry[]): number {
   let total = 0;
   for (const entry of entries) {
@@ -101,37 +47,10 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   let epoch = 0;
   let lastStatus = "No evaluation yet";
   let warned = false;
-  let barLabel = `${config.endpoint ? "Nimble ready" : "Nimble dormant"} · 0 tokens removed so far`;
-  let editorTui: { requestRender(): void } | undefined;
-  let editorInstalled = false;
-
-  const installEditorStatus = (ctx: ExtensionContext): boolean => {
-    if (ctx.mode !== "tui") return false;
-    const current = ctx.ui.getEditorComponent();
-    if (isNimbleEditorFactory(current)) return true;
-
-    const factory: EditorFactory = (tui, theme, keybindings) => {
-      editorTui = tui;
-      const inner = current?.(tui, theme, keybindings) ?? new CustomEditor(tui, theme, keybindings);
-      return editorWithStatus(inner, () => barLabel, ctx.ui.theme);
-    };
-    Object.defineProperty(factory, NIMBLE_EDITOR_FACTORY, { value: true });
-    ctx.ui.setEditorComponent(factory);
-    ctx.ui.setStatus("pi-nimble", undefined);
-    return true;
-  };
-
   const updateStatus = (ctx: ExtensionContext) => {
     const saved = cumulativeClearedTokens(ctx.sessionManager.getEntries());
     const savings = `${saved ? `~${compactTokens(saved)}` : "0"} tokens removed so far`;
     const active = pi.getActiveTools().includes("nimble_read");
-    const state = !config.endpoint ? "Nimble dormant"
-      : !active || nativeCheckpoint(ctx.sessionManager.getBranch()) ? "Nimble paused"
-      : controller ? "Nimble checking…"
-      : warned ? "Nimble error"
-      : "Nimble ready";
-    barLabel = `${state} · ${savings}`;
-    if (editorInstalled && ctx.mode === "tui") { editorTui?.requestRender(); return; }
     if (!ctx.hasUI) return;
     if (!config.endpoint) { ctx.ui.setStatus("pi-nimble", `Nimble: dormant · ${savings}`); return; }
     if (!active) { ctx.ui.setStatus("pi-nimble", `Nimble: paused · ${savings} · nimble_read inactive`); return; }
@@ -146,16 +65,6 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
     ctx.ui.setStatus("pi-nimble", `Nimble: ${controller ? "checking…" : warned ? "error" : pressure} · ${savings}`);
   };
 
-  const globals = globalThis as Record<PropertyKey, unknown>;
-  const previousListener = globals[NIMBLE_EDITOR_LISTENER];
-  if (typeof previousListener === "function") previousListener();
-  const disposeEditorListener = pi.events?.on(EDITOR_COMPONENT_CHANGED_EVENT, payload => {
-    try { editorInstalled = installEditorStatus(payload as ExtensionContext); }
-    catch { /* A stale session context can outlive an editor-change event. */ }
-  });
-  if (disposeEditorListener) globals[NIMBLE_EDITOR_LISTENER] = disposeEditorListener;
-  else delete globals[NIMBLE_EDITOR_LISTENER];
-
   const reset = () => {
     epoch++;
     controller?.abort();
@@ -166,14 +75,11 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   };
   pi.on("session_start", (_event, ctx) => {
     reset();
-    editorInstalled = installEditorStatus(ctx);
     if (!config.endpoint && ctx.hasUI) ctx.ui.notify("pi-nimble is disabled by an empty PI_NIMBLE_URL. Unset it to use local Ollama, then restart Pi. Normal compaction remains enabled.", "info");
     updateStatus(ctx);
   });
   pi.on("session_shutdown", (_event, ctx) => {
     reset();
-    editorInstalled = false;
-    editorTui = undefined;
     if (ctx.hasUI) ctx.ui.setStatus("pi-nimble", undefined);
   });
   pi.on("session_tree", (_event, ctx) => { reset(); updateStatus(ctx); });

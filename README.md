@@ -77,7 +77,7 @@ Retrieve with nimble_read({"ref":"…"}). Do not rerun a side-effecting command 
 
 For both tiers, the model uses the marker's actual `ref`. Optional `offset` and `limit` are **character counts**: offset starts at 0, pages default to 8,000 characters, and each page is capped at 16,000. Retrieval reads the saved output even if the source file has since changed.
 
-Interactive Pi shows `ready`, `checking…`, `paused`, `dormant`, or `error` alongside estimated tokens removed so far. `/nimble-status` separates the cumulative session total, reductions active on this branch, and the latest activity. A pass with no additional changes does not undo earlier reductions; deferred reductions wait for a batch large enough to justify rewriting the prompt cache. Token counts use Pi's rough estimate (approximately one token per four characters), not the active model's exact tokenizer. The cumulative estimate is not a billing-savings counter and is not reset by branch navigation, reloads, or `/nimble-reset`.
+Interactive Pi shows Nimble status in the footer via Pi's standard extension-status API, alongside estimated tokens removed so far. It shows current context usage (or `waiting` when unavailable), `checking…`, `paused`, `dormant`, or `error`. Nimble does not replace the editor, inject text into its border, or replace a custom footer. Custom footers must render extension statuses; with `pi-open-tui`, enable **Extension status line** (`footerSegments.extensionStatuses: true`). `/nimble-status` separates the cumulative session total, reductions active on this branch, and the latest activity. A pass with no additional changes does not undo earlier reductions; deferred reductions wait for a batch large enough to justify rewriting the prompt cache. Token counts use Pi's rough estimate (approximately one token per four characters), not the active model's exact tokenizer. The cumulative estimate is not a billing-savings counter and is not reset by branch navigation, reloads, or `/nimble-reset`.
 
 > [!WARNING]
 > Keep `nimble_read` enabled in tool allowlists. Disabling it restores full projected outputs and pauses new pruning. Avoid loading another general-purpose context-pruning extension alongside this one. Provider-native Codex checkpoints also pause pruning on their branch; retrieval remains available.
@@ -157,6 +157,7 @@ A successful response contains `answers.keep.noul`, a probability between 0 and 
 | `dormant` | Check whether `PI_NIMBLE_URL` was explicitly set to an empty value. |
 | `paused` | Check the `nimble_read` allowlist and provider-native Codex checkpoint status. |
 | No outputs pruned | Inspect `/nimble-status`: context may be below the trigger, outputs may be protected, or the payback gate may defer the batch. |
+| No footer indicator | Run `/nimble-status` to check activity independently. Ensure your custom footer displays extension statuses; in `pi-open-tui`, enable **Extension status line**. Reload or restart Pi after updating the extension. |
 | Timeout, `503`, or `529` | Warm or check the scoring service; the plugin applies no new decisions and does not retry in a loop. |
 | Remote `401` | Verify your endpoint's authentication; Modal proxy authentication is unsupported. |
 
