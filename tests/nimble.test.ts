@@ -267,13 +267,22 @@ test("TUI publishes and clears footer status without accessing or replacing the 
   });
   h.pressure(1);
   await h.fire("session_start");
-  assert.match(h.statuses.at(-1)!, /^Nimble: .* · 0 tokens removed so far$/);
+  assert.equal(h.statuses.at(-1), "Nimble saved 0 tokens");
   assert.equal(h.statusUpdates.at(-1)!.key, "pi-nimble");
   h.active([]);
   await h.fire("turn_end");
   assert.match(h.statuses.at(-1)!, /paused.*nimble_read inactive/);
   await h.fire("session_shutdown");
   assert.deepEqual(h.statusUpdates.at(-1), { key: "pi-nimble", text: undefined });
+});
+
+test("healthy footer reports removed tokens without reading or duplicating context usage", async () => {
+  const h = harness();
+  (h.ctx as any).getContextUsage = () => { assert.fail("Footer must not read context usage"); };
+  await h.fire("session_start");
+  assert.equal(h.statuses.at(-1), "Nimble saved 0 tokens");
+  assert.doesNotMatch(h.statuses.at(-1)!, /%|waiting/);
+  await h.fire("session_shutdown");
 });
 
 test("headless lifecycle does not publish UI status", async () => {
@@ -585,7 +594,7 @@ test("automatic hook flow persists only masks and retrieval returns exact paged 
   const originalEntries = structuredClone(h.sm.getBranch());
   const wanted = candidates(messages, new Set(), 2_000)[0]!;
   await h.fire("turn_end");
-  assert.match(h.statuses.at(-1)!, /^Nimble: 70\.0% · ~[\d.]+k tokens removed so far$/);
+  assert.match(h.statuses.at(-1)!, /^Nimble saved ~[\d.]+k tokens$/);
   assert.equal(requests, 1);
   assert.deepEqual(h.sm.getBranch().slice(0, originalEntries.length), originalEntries);
   assert.equal(ledger(h.sm.getBranch()).size, 2);
@@ -640,7 +649,7 @@ test("branch-local reset releases masks append-only and keeps original evidence"
   const maskedLeaf = h.sm.getLeafId()!;
   const entriesBefore = h.sm.getBranch().length;
   assert.equal(ledger(h.sm.getBranch()).size, 2);
-  const cumulativeSaved = /~[\d.]+k tokens removed so far$/.exec(h.statuses.at(-1)!)![0];
+  const cumulativeSaved = /^Nimble saved ~[\d.]+k tokens/.exec(h.statuses.at(-1)!)![0];
 
   await h.commands.get("nimble-reset")!.handler("", h.ctx);
   const resetLeaf = h.sm.getLeafId()!;
@@ -649,11 +658,11 @@ test("branch-local reset releases masks append-only and keeps original evidence"
   assert.equal(ledger(h.sm.getBranch()).size, 0);
   assert.equal(original(h.sm.getBranch(), wanted.ref), wanted.result);
   assert.deepEqual((await h.fire("context", { messages })).messages, messages);
-  assert.ok(h.statuses.at(-1)!.endsWith(cumulativeSaved), "reset releases masks without erasing cumulative savings");
+  assert.ok(h.statuses.at(-1)!.startsWith(cumulativeSaved), "reset releases masks without erasing cumulative savings");
 
   h.sm.branch(maskedLeaf); await h.fire("session_tree");
   assert.equal(ledger(h.sm.getBranch()).size, 2, "a sibling before reset keeps its branch masks");
-  assert.ok(h.statuses.at(-1)!.endsWith(cumulativeSaved), "cumulative session savings survive branch navigation");
+  assert.ok(h.statuses.at(-1)!.startsWith(cumulativeSaved), "cumulative session savings survive branch navigation");
   h.sm.branch(resetLeaf); await h.fire("session_tree");
   assert.equal(ledger(h.sm.getBranch()).size, 0);
   h.sm.appendCustomEntry(ENTRY_TYPE, { version: 1, refs: [wanted.ref] });
@@ -666,12 +675,12 @@ test("pressure, missing endpoint, disabled retrieval, null usage and all-keep co
   h.pressure(44_999); await h.fire("turn_end"); assert.equal(calls, 0);
   h.pressure(null); await h.fire("turn_end"); assert.equal(calls, 0);
   h.pressure(47_600); h.active([]); await h.fire("turn_end"); assert.equal(calls, 0);
-  assert.equal(h.statuses.at(-1), "Nimble: paused · 0 tokens removed so far · nimble_read inactive");
+  assert.equal(h.statuses.at(-1), "Nimble saved 0 tokens · paused · nimble_read inactive");
   h.active(["nimble_read"]); await h.fire("turn_end"); await h.fire("turn_end"); assert.equal(calls, 1);
   assert.equal(ledger(h.sm.getBranch()).size, 0);
   const missing = harness(fakeFetch(0, () => calls++), { ...config, endpoint: "" });
   await missing.fire("session_start"); await missing.fire("turn_end");
-  assert.equal(missing.statuses.at(-1), "Nimble: dormant · 0 tokens removed so far");
+  assert.equal(missing.statuses.at(-1), "Nimble saved 0 tokens · dormant");
   assert.equal(await missing.fire("context", { messages: transcript() }), undefined);
   assert.equal(calls, 1);
 });
@@ -808,7 +817,7 @@ test("failures and failed persistence commit no new pruning", async () => {
   persist.pi.appendEntry = () => { throw new Error("disk unavailable"); };
   await persist.fire("turn_end");
   assert.equal(ledger(persist.sm.getBranch()).size, 0);
-  assert.match(persist.statuses.at(-1)!, /0 tokens removed so far/, "failed persistence is not counted as savings");
+  assert.match(persist.statuses.at(-1)!, /saved 0 tokens/, "failed persistence is not counted as savings");
   const release = harness();
   await release.fire("turn_end");
   release.pi.appendEntry = (type: string, data: unknown) => {
@@ -827,8 +836,8 @@ test("restart and branch navigation recover only branch-local masks and evidence
   const prunedLeaf = h.sm.getLeafId()!;
   await h.fire("session_start");
   assert.equal(ledger(h.sm.getBranch()).size, 2);
-  assert.match(h.statuses.at(-1)!, /tokens removed so far$/);
-  const cumulativeSaved = /~[\d.]+k tokens removed so far$/.exec(h.statuses.at(-1)!)![0];
+  assert.match(h.statuses.at(-1)!, /^Nimble saved ~[\d.]+k tokens$/);
+  const cumulativeSaved = /^Nimble saved ~[\d.]+k tokens/.exec(h.statuses.at(-1)!)![0];
   assert.equal(original(h.sm.getBranch(), target.ref), target.result);
   h.sm.branch(forkPoint); await h.fire("session_tree");
   assert.equal(ledger(h.sm.getBranch()).size, 0);
@@ -839,7 +848,7 @@ test("restart and branch navigation recover only branch-local masks and evidence
   assert.equal(original(h.sm.getBranch(), siblingRef), undefined);
   await h.fire("session_compact");
   assert.equal(ledger(h.sm.getBranch()).size, 2, "old entries remain available for retained-tail masks and evidence");
-  assert.ok(h.statuses.at(-1)!.endsWith(cumulativeSaved), "compaction does not erase cumulative savings");
+  assert.ok(h.statuses.at(-1)!.startsWith(cumulativeSaved), "compaction does not erase cumulative savings");
 });
 
 test("late Nimble results after a tree change cannot append decisions", async () => {

@@ -49,20 +49,17 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   let warned = false;
   const updateStatus = (ctx: ExtensionContext) => {
     const saved = cumulativeClearedTokens(ctx.sessionManager.getEntries());
-    const savings = `${saved ? `~${compactTokens(saved)}` : "0"} tokens removed so far`;
+    const savings = `Nimble saved ${saved ? `~${compactTokens(saved)}` : "0"} tokens`;
     const active = pi.getActiveTools().includes("nimble_read");
     if (!ctx.hasUI) return;
-    if (!config.endpoint) { ctx.ui.setStatus("pi-nimble", `Nimble: dormant · ${savings}`); return; }
-    if (!active) { ctx.ui.setStatus("pi-nimble", `Nimble: paused · ${savings} · nimble_read inactive`); return; }
+    if (!config.endpoint) { ctx.ui.setStatus("pi-nimble", `${savings} · dormant`); return; }
+    if (!active) { ctx.ui.setStatus("pi-nimble", `${savings} · paused · nimble_read inactive`); return; }
     if (nativeCheckpoint(ctx.sessionManager.getBranch())) {
-      ctx.ui.setStatus("pi-nimble", `Nimble: paused · ${savings} · Codex checkpoint owns provider context`);
+      ctx.ui.setStatus("pi-nimble", `${savings} · paused · Codex checkpoint owns provider context`);
       return;
     }
-    const usage = ctx.getContextUsage();
-    const pressure = usage?.tokens !== null && usage?.tokens !== undefined && ctx.model?.contextWindow
-      ? `${(usage.tokens / ctx.model.contextWindow * 100).toFixed(1)}%`
-      : "waiting";
-    ctx.ui.setStatus("pi-nimble", `Nimble: ${controller ? "checking…" : warned ? "error" : pressure} · ${savings}`);
+    const activity = controller ? " · checking…" : warned ? " · error" : "";
+    ctx.ui.setStatus("pi-nimble", `${savings}${activity}`);
   };
 
   const reset = () => {
