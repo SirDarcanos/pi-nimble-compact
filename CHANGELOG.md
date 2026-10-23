@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Use pnpm for repository dependency installation, checks, and CI while retaining npm trusted publishing.
+
 ### Fixed
 
 - Accept Ollama's optional prompt-cache token count instead of rejecting successful Nimble scoring responses.

@@ -12,8 +12,8 @@ Trusted publishing needs an existing npm package. Register the first version man
 2. In a clean checkout of that main commit, run:
 
    ```sh
-   npm ci --ignore-scripts
-   npm run check
+   pnpm install --frozen-lockfile --ignore-scripts
+   pnpm run check
    node scripts/verify-release.mjs v0.1.0
    npm publish --dry-run --ignore-scripts --registry=https://registry.npmjs.org
    npm login --registry=https://registry.npmjs.org
@@ -34,15 +34,15 @@ Trusted publishing needs an existing npm package. Register the first version man
 
 For the manually published first version, disable **Publish to npm** in GitHub Actions before creating its GitHub tag/release, then re-enable it afterward. That version is already on npm; do not rerun its publish job or try to republish it. Subsequent versions use CI normally.
 
-See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) for dashboard details and requirements. The workflow uses a GitHub-hosted runner, Node 24, npm 11 (OIDC requires npm ≥11.5.1), and public-package provenance. Account setup is manual; this repository does not store credentials.
+See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) for dashboard details and requirements. The workflow uses a GitHub-hosted runner, Node 24, pnpm 11.20.0 for dependency installation and checks, npm 11 for publishing (OIDC requires npm ≥11.5.1), and public-package provenance. Install the pinned pnpm version before running the local commands below. Account setup is manual; this repository does not store credentials.
 
 ## Prepare each release
 
 1. Start a release-preparation branch from updated main. Choose a stable Semantic Versioning version: patch for fixes, minor for compatible features, major for breaking changes. Prereleases are not supported by this workflow.
-2. Update both manifests without creating a tag:
+2. Update the package version without creating a tag (pnpm's lockfile does not store the root package version):
 
    ```sh
-   npm version 0.1.1 --no-git-tag-version
+   pnpm version 0.1.1 --no-git-tag-version
    ```
 
    For the first release, keep the existing `0.1.0` if appropriate; no version command is needed.
@@ -50,14 +50,14 @@ See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) for dash
 4. Verify:
 
    ```sh
-   npm ci --ignore-scripts
-   npm run check
+   pnpm install --frozen-lockfile --ignore-scripts
+   pnpm run check
    node scripts/verify-release.mjs v0.1.1
-   npm pack --dry-run --ignore-scripts
+   pnpm pack --dry-run
    git diff --check
    ```
 
-5. Commit the manifests and changelog, open a PR to main, and merge only after CI passes.
+5. Commit `package.json`, any dependency changes in `pnpm-lock.yaml`, and the changelog, open a PR to main, and merge only after CI passes.
 
 ## Publish through GitHub
 
@@ -74,7 +74,7 @@ gh release create v0.1.1 --verify-tag --title "v0.1.1" --notes-file /path/to/rel
 
 Write the notes file from that version's changelog entries first. Alternatively, publish a release for the existing tag through GitHub's Releases UI. Creating a release is the publish trigger; approve the npm environment deployment if configured.
 
-The job verifies that the tagged commit belongs to main, the stable tag matches `package.json` and `package-lock.json`, and the changelog contains that version's dated heading. It then runs tests (including packed-package loading), previews the package, and publishes publicly with OIDC and provenance.
+The job verifies that the tagged commit belongs to main, the stable tag matches `package.json`, and the changelog contains that version's dated heading. A frozen pnpm install verifies `pnpm-lock.yaml` against the manifest. It then runs tests (including packed-package loading), previews the package, and publishes publicly with OIDC and provenance.
 
 After it succeeds, verify:
 

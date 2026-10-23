@@ -39,8 +39,9 @@ jobs:
           package-manager-cache: false
       - name: Install OIDC-capable npm
         run: npm install --global npm@11 --ignore-scripts
-      - run: npm ci --ignore-scripts
-      - run: npm run check
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run check
       - run: npm publish --dry-run --ignore-scripts
       - name: Publish with trusted publishing
         run: npm publish --access public --provenance --ignore-scripts
