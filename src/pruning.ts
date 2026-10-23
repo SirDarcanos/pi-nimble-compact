@@ -450,7 +450,11 @@ export async function score(
   }
   const data = await boundedJson(response, requestSignal);
   const ids = request.choices.map((_item, index) => `r${index}`);
-  if (!record(data) || !exactKeys(data, ["model", "answers", "usage"])
+  if (!record(data) || !exactKeys(data, ["model", "answers", "usage",
+    ...(Object.hasOwn(data, "prompt_eval_cached_count") ? ["prompt_eval_cached_count"] : [])])
+    || (Object.hasOwn(data, "prompt_eval_cached_count")
+      && (typeof data.prompt_eval_cached_count !== "number" || !Number.isSafeInteger(data.prompt_eval_cached_count)
+        || data.prompt_eval_cached_count < 0))
     || typeof data.model !== "string" || !(data.model === config.model
       || (config.model === "nimble" && data.model === "nimble:latest")
       || (config.model === "nimble:latest" && data.model === "nimble")

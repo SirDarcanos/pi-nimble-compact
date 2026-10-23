@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Accept Ollama's optional prompt-cache token count instead of rejecting successful Nimble scoring responses.
+
 ## [0.2.3] - 2026-10-15
 
 ### Fixed
