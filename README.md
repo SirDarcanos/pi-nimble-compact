@@ -37,7 +37,7 @@ The default endpoint is `http://127.0.0.1:11434/v1/systemone`, model `nimble`, w
 To try a repository checkout without installing the package:
 
 ```sh
-npm ci
+pnpm install --frozen-lockfile
 pi -e ./extensions/nimble.ts
 ```
 
@@ -167,14 +167,14 @@ Pi's normal manual, threshold, and overflow compaction remain available when Nim
 
 ## Development
 
-From a repository checkout:
+From a repository checkout, use pnpm **11.20.0** (pinned in `package.json`). Install it with `npm install --global pnpm@11.20.0` if needed. npm remains the release publishing client and is used by the npm-consumer compatibility test.
 
 ```sh
-npm ci
-npm run check
-npm pack --dry-run
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm pack --dry-run
 # Optional: sends a canned fixture to local Ollama with Nimble installed
-npm run smoke:ollama
+pnpm run smoke:ollama
 ```
 
 The default suite uses synthetic sessions and mocked scoring responses. It covers projection, persistence/reset, branch safety, paging, SDK integration, package loading, transport limits, and failure handling. The Pi 0.99.2 development dependency tree has a documented `brace-expansion` advisory pinned by its shrinkwrap; this project does not claim to resolve existing dependency alerts.
@@ -183,10 +183,10 @@ The default suite uses synthetic sessions and mocked scoring responses. It cover
 
 ```sh
 # Three tasks × three conditions × two repeats: makes main-model requests
-npm run quality:run -- --trials 2
+pnpm run quality:run --trials 2
 
 # Single-task, single-arm smoke trial
-npm run quality:run -- --trials 1 --task contract --arm two-tier
+pnpm run quality:run --trials 1 --task contract --arm two-tier
 ```
 
 The default main agent is **openai-codex / gpt-6.1-sol**, using existing Pi credentials. Override with `--provider` and `--model`; unavailable models fail without substitution. Tasks cover a buried contract, historical receipt recovery after its file changes, and accurate historical test counts with instruction-like diagnostic content.

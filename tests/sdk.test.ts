@@ -68,7 +68,11 @@ test("active Pi tool loop scores concurrently and prunes a later model request",
         async execute() { return { content: [{ type: "text" as const, text: "fresh output" }], details: {} }; },
       }),
       pi => registerNimble(pi, {
-        config: { ...configuration({}), endpoint: "http://127.0.0.1:8000/v1/systemone", apiKey: "fixture", keepRecentTokens: 2_000 },
+        // This test covers asynchronous persistence/projection, not cache economics.
+        // SDK-generated system prompts vary with the installation layout; use a
+        // generous payback horizon here. Dedicated pruning tests cover the gate.
+        config: { ...configuration({}), endpoint: "http://127.0.0.1:8000/v1/systemone", apiKey: "fixture",
+          keepRecentTokens: 2_000, maxPaybackTurns: 1_000 },
         fetch: (async (_url, init) => {
           evaluations++;
           const request = JSON.parse(String(init?.body));

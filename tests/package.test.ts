@@ -11,6 +11,8 @@ test("published tarball installs offline without runtime dependencies and loads 
   const root = fileURLToPath(new URL("../", import.meta.url));
   const temp = mkdtempSync(join(tmpdir(), "pi-nimble-package-"));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
+  // Keep this consumer check on npm: Pi installs the published npm package,
+  // independently of pnpm being used to develop this repository.
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const packed = JSON.parse(execFileSync(npm, ["pack", "--ignore-scripts", "--json", "--pack-destination", temp], { cwd: root, encoding: "utf8" }));
   assert.deepEqual(packed[0].files.map((file: { path: string }) => file.path).sort(), ["LICENSE", "NOTICE.md", "README.md", "extensions/nimble.ts", "licenses/fast-jev-compaction-MIT.txt", "licenses/pi-jev-compaction-MIT.txt", "package.json", ...["client", "compact", "index", "messages", "request", "state", "types"].map(name => `src/engine/${name}.ts`), "src/pruning.ts"].sort());
