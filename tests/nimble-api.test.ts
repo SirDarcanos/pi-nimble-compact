@@ -132,6 +132,31 @@ test("Ollama's documented response and canonical latest tag are accepted without
   assert.equal(scored.inputTokens, 841);
 });
 
+test("Ollama's optional cache count is accepted without changing scoring", async () => {
+  const messages = history(), choices = candidates(messages, new Set(), config.keepRecentTokens);
+  for (const cached of [0, 100]) {
+    const result = await score(messages, choices, config, undefined, (async () => Response.json({
+      model: "nimble", answers: { r0: { type: "noul", noul: 0.1 } },
+      usage: { input_tokens: 841, output_tokens: 0 }, prompt_eval_cached_count: cached,
+    })) as typeof fetch);
+    assert.deepEqual(result.refs, choices.map(item => item.ref));
+    assert.equal(result.inputTokens, 841);
+  }
+});
+
+test("malformed cache counts and unrelated response fields still fail closed", async () => {
+  const messages = history(), choices = candidates(messages, new Set(), config.keepRecentTokens);
+  for (const extra of [
+    ...[null, "0", -1, 0.5, Number.MAX_SAFE_INTEGER + 1].map(prompt_eval_cached_count => ({ prompt_eval_cached_count })),
+    { prompt_eval_cached_count: 0, unexpected: true },
+  ]) {
+    await assert.rejects(score(messages, choices, config, undefined, (async () => Response.json({
+      model: "nimble", answers: { r0: { type: "noul", noul: 0.1 } },
+      usage: { input_tokens: 841, output_tokens: 0 }, ...extra,
+    })) as typeof fetch), { message: "Invalid Nimble response" });
+  }
+});
+
 test("Nimble keys are optional and sent only to the configured endpoint", async () => {
   const messages = history(), choices = candidates(messages, new Set(), config.keepRecentTokens);
   let called = false;
