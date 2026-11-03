@@ -1,7 +1,7 @@
 {
   "name": "pi-nimble-compact",
-  "version": "0.2.3",
-  "description": "Automatic Nimble context clearing for Pi. Keep the conversation, prune stale tool output, retrieve originals without rerunning commands.",
+  "version": "0.2.4",
+  "description": "Deprecated: use pi-s1-compact. Legacy Nimble tool-output pruning for Pi with original evidence retrieval.",
   "type": "module",
   "packageManager": "pnpm@11.20.0",
   "license": "MIT",

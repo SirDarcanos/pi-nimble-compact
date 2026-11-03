@@ -257,6 +257,40 @@ test("mixed payback preserves clearing, shortening and incremental upgrade seman
   assert.doesNotMatch(textOf(upgradedResult), /BEGIN_/);
 });
 
+test("migration notice appears only at UI session start and leaves evidence and pruning intact", async () => {
+  let requests = 0;
+  const h = harness(fakeFetch(0.1, () => { requests++; }));
+  const entries = structuredClone(h.sm.getEntries());
+  await h.fire("session_start");
+  assert.equal(h.notices.length, 1);
+  assert.match(h.notices[0]!, /deprecated.*pi-s1-compact.*Node\.js 24\+.*Pi 1\.0\+/);
+  assert.match(h.notices[0]!, /https:\/\/github\.com\/SirDarcanos\/pi-nimble-compact#migrate-to-pi-s1-compact/);
+  assert.deepEqual(h.sm.getEntries(), entries, "the notice must not write session or migration records");
+  assert.equal(requests, 0);
+  assert.deepEqual([...h.commands.keys()].sort(), ["nimble-compact", "nimble-reset", "nimble-status"]);
+  assert.deepEqual([...h.tools.keys()], ["nimble_read"]);
+  await h.fire("turn_end");
+  assert.equal(requests, 1);
+  assert.equal(ledger(h.sm.getBranch()).size, 2, "existing scoring and persistence remain operational");
+  await h.fire("context", { messages: transcript() });
+  await h.fire("session_tree");
+  await h.fire("session_compact");
+  await h.fire("session_shutdown");
+  assert.equal(h.notices.length, 1, "normal lifecycle events must not repeat the migration notice");
+  await h.fire("session_start");
+  assert.equal(h.notices.length, 2, "a subsequent session start displays one fresh notice");
+});
+
+test("disabled pruning still shows migration guidance without making requests", async () => {
+  const h = harness((async () => { assert.fail("disabled extension must not request scoring"); }) as typeof fetch,
+    { ...config, endpoint: "" });
+  await h.fire("session_start");
+  assert.equal(h.notices.filter(notice => notice.includes("deprecated")).length, 1);
+  assert.ok(h.notices.some(notice => notice.includes("disabled by an empty PI_NIMBLE_URL")));
+  await h.fire("turn_end");
+  assert.equal(ledger(h.sm.getBranch()).size, 0);
+});
+
 test("TUI publishes and clears footer status without accessing or replacing the editor", async () => {
   const h = harness();
   (h.ctx as any).mode = "tui";
@@ -294,6 +328,7 @@ test("headless lifecycle does not publish UI status", async () => {
   await h.fire("turn_end");
   await h.fire("session_shutdown");
   assert.deepEqual(h.statusUpdates, []);
+  assert.deepEqual(h.notices, [], "headless mode must not emit migration notices");
 });
 
 test("candidate selection protects recent batches, errors, skills, images, tool loading, coordination and ambiguous pairs", () => {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-03
+
+### Deprecated
+
+- Final release: migrate to [pi-s1-compact](https://github.com/SirDarcanos/pi-s1-compact), which requires Node.js 24+ and Pi 1.0+. Show migration guidance at interactive session start and document package replacement, command changes, environment fallbacks, and historical retrieval compatibility. Legacy functionality remains intact; migration is manual. The repository will be archived after publication.
+
 ### Changed
 
 - Use pnpm for repository dependency installation, checks, and CI while retaining npm trusted publishing.
@@ -59,7 +65,8 @@ First release.
 
 - Use the unscoped npm package name `pi-nimble-compact`.
 
-[unreleased]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.3...HEAD
+[unreleased]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/SirDarcanos/pi-nimble-compact/compare/v0.2.0...v0.2.1

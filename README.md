@@ -1,8 +1,32 @@
 # pi-nimble-compact
 
+> [!WARNING]
+> **Deprecated: migrate to [pi-s1-compact](https://github.com/SirDarcanos/pi-s1-compact).** Version 0.2.4 is the final release; this repository is being archived. Existing functionality remains available, but maintenance continues in the successor. Updating this package does not install the successor or change your settings.
+
+## Migrate to pi-s1-compact
+
+1. Upgrade to **Node.js 24+** and **Pi 1.0+** before switching. The legacy package retains its existing requirements; it does not upgrade your runtime for you.
+2. Exit Pi. For a personal npm installation, replace the package:
+
+   ```sh
+   pi remove npm:pi-nimble-compact
+   pi install npm:pi-s1-compact
+   ```
+
+   For a project-local installation, use `--local` on both commands. Use `pi list` to find the exact source if you installed from Git or a local path; remove that source instead. Remove any manually configured `extensions/nimble.ts` loading path as well. Do not load both pruners: the successor pauses pruning when it detects the legacy extension.
+3. Restart Pi and run `/s1-compact-status`. Use `/s1-compact` and `/s1-compact-reset` instead of `/nimble-compact` and `/nimble-reset`; the old slash commands are not aliases. `/s1-compact-settings` selects the classifier and automatic-pruning setting. Local Ollama Nimble remains the default.
+
+Keep your existing session files. Original outputs, historical pruning records, and `nimble_read` references remain usable in the successor, which exposes `s1_compact_read` as its primary retrieval tool and keeps `nimble_read` as a compatibility alias. If you use a tool allowlist, enable the primary tool; alias-only allowlists remain supported. No session reset, export, or deletion is needed.
+
+Existing `PI_NIMBLE_*` variables and `NIMBLE_API_KEY` remain fallbacks when their corresponding `PI_S1_COMPACT_*` names are **unset**. An explicitly set new variable, including an empty value, takes precedence. See the successor's [configuration reference](https://github.com/SirDarcanos/pi-s1-compact/blob/main/docs/configuration.md) and [safety reference](https://github.com/SirDarcanos/pi-s1-compact/blob/main/docs/safety.md) before changing destinations or enabling remote scoring.
+
+## Legacy documentation
+
+The remainder describes the preserved legacy behavior for existing installations, not the successor.
+
 Automatic tool-output pruning for [Pi](https://pi.dev), powered by [Bespoke Nimble](https://github.com/bespokelabsai/nimble). Replace stale outputs with retrieval markers, shorten retained long outputs, and recover originals from session history without rerunning commands.
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [Commands](#commands-and-retrieval) · [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Development](#development)
+[Legacy quick start](#legacy-quick-start) · [How it works](#how-it-works) · [Commands](#commands-and-retrieval) · [Configuration](#configuration) · [Troubleshooting](#troubleshooting) · [Development](#development)
 
 - **Local scoring by default:** Nimble runs through Ollama; the plugin does not replace your main coding model.
 - **Original evidence preserved:** pruning changes the model-facing projection, not the saved tool output.
@@ -14,7 +38,7 @@ Adapted from [Nour Helmi's pi-jev-compaction](https://github.com/nourhelmi/pi-je
 > [!IMPORTANT]
 > Truncation keeps the first and last 300 characters; it is not semantic summarization. Evidence in the middle may require retrieval. Smaller context does not guarantee lower token usage or cost.
 
-## Quick start
+## Legacy quick start
 
 ### Requirements
 
@@ -86,7 +110,7 @@ Pruning reduces tool-output text in subsequent model requests, not the on-disk h
 
 ## Releases
 
-The npm package is named `pi-nimble-compact`. See [the release guide](https://github.com/SirDarcanos/pi-nimble-compact/blob/main/docs/releasing.md) for first-publish setup, version preparation, and GitHub Actions trusted publishing.
+Version 0.2.4 is the final `pi-nimble-compact` release. See [the release guide](https://github.com/SirDarcanos/pi-nimble-compact/blob/main/docs/releasing.md) for its publication and archival procedure. New development belongs in [pi-s1-compact](https://github.com/SirDarcanos/pi-s1-compact).
 
 ## Configuration
 
