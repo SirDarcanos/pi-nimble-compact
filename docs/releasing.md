@@ -2,9 +2,25 @@
 
 Stable GitHub releases publish the matching package version to npm. Draft releases, prereleases, ordinary commits, and tag pushes do not publish. CI runs the offline checks on pull requests and main; publishing runs them again.
 
-## One-time setup
+## Final release and archival
 
-The npm package name is **pi-nimble-compact**, without a scope. The npm account `nicolamustone` must own it or have publishing access. The registry currently returns 404 for this name; this is not a guarantee that npm will accept or reserve it.
+SirDarcanos approved `0.2.4` as the final compatibility-preserving release, including its preparation PR, merge, tag, GitHub release, npm publication, deprecation of all npm versions, and repository archival. No automatic installation, settings migration, credential changes, or removal of historical packages is included. New work continues in [pi-s1-compact](https://github.com/SirDarcanos/pi-s1-compact); the [migration guide](../README.md#migrate-to-pi-s1-compact) covers the higher runtime requirements and preserved evidence.
+
+Use the preparation and publishing procedure below for `0.2.4`, then:
+
+1. Verify the publish workflow succeeded and the public npm version and `latest` tag are `0.2.4`. Do not archive while publishing is pending or failed.
+2. Using existing authorized npm maintainer access, deprecate all versions with the same migration message:
+
+   ```sh
+   npm deprecate 'pi-nimble-compact@*' 'Deprecated: migrate to pi-s1-compact (Node.js 24+, Pi 1.0+). Migration guide: https://github.com/SirDarcanos/pi-nimble-compact#migrate-to-pi-s1-compact' --registry=https://registry.npmjs.org/
+   ```
+
+   Complete npm's 2FA prompt if required. Read back each published version's `deprecated` field. Deprecation adds a warning; it does not uninstall existing copies or automatically move users to the successor. If authentication fails, stop for maintainer action rather than adding credentials or substituting a token.
+3. Archive `SirDarcanos/pi-nimble-compact` on GitHub only after publication and deprecation are verified. Read back its archived status. Archival makes the repository read-only; it does not delete npm packages or user sessions.
+
+## One-time setup (historical)
+
+The npm package name is **pi-nimble-compact**, without a scope. The npm account `nicolamustone` must own it or have publishing access. The package is already published; the first-publication procedure below is retained for reference, not to repeat during the final release.
 
 Trusted publishing needs an existing npm package. Register the first version manually, then enable CI publishing:
 

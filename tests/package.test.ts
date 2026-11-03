@@ -24,6 +24,15 @@ test("published tarball installs offline without runtime dependencies and loads 
   const installed = join(consumer, "node_modules/pi-nimble-compact");
   const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
   assert.ok(manifest.keywords.includes("pi-package"));
+  assert.equal(manifest.version, "0.2.4");
+  assert.match(manifest.description, /Deprecated: use pi-s1-compact/);
+  assert.deepEqual(manifest.engines, { node: ">=22.19.0" }, "the legacy release must not raise runtime requirements");
+  const readme = readFileSync(join(installed, "README.md"), "utf8");
+  assert.match(readme, /## Migrate to pi-s1-compact/);
+  assert.match(readme, /pi remove npm:pi-nimble-compact\s+pi install npm:pi-s1-compact/);
+  assert.match(readme, /Node\.js 24\+.*Pi 1\.0\+/);
+  assert.match(readme, /Do not load both pruners/);
+  assert.match(readme, /Keep your existing session files/);
   const loader = new DefaultResourceLoader({ cwd: consumer, agentDir: join(temp, "agent"),
     settingsManager: SettingsManager.inMemory(), additionalExtensionPaths: manifest.pi.extensions.map((path: string) => join(installed, path)),
     noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });

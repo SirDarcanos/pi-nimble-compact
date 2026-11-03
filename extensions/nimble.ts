@@ -72,6 +72,7 @@ export function registerNimble(pi: ExtensionAPI, options: { config?: Config; fet
   };
   pi.on("session_start", (_event, ctx) => {
     reset();
+    if (ctx.hasUI) ctx.ui.notify("pi-nimble-compact is deprecated. Migrate to pi-s1-compact (Node.js 24+, Pi 1.0+). Guide: https://github.com/SirDarcanos/pi-nimble-compact#migrate-to-pi-s1-compact. Existing functionality remains available.", "warning");
     if (!config.endpoint && ctx.hasUI) ctx.ui.notify("pi-nimble is disabled by an empty PI_NIMBLE_URL. Unset it to use local Ollama, then restart Pi. Normal compaction remains enabled.", "info");
     updateStatus(ctx);
   });
